@@ -10,7 +10,7 @@ interface BalancesTabProps {
   splits: ExpenseSplit[];
   members: Member[];
   settlements: Settlement[];
-  onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number, currency: Currency) => void;
+  onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number, currency: Currency) => void | Promise<void>;
 }
 
 export const BalancesTab: React.FC<BalancesTabProps> = ({
@@ -24,6 +24,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
 }) => {
   const approvedMembers = members.filter(member => member.status === 'approved');
   const [activeSubTab, setActiveSubTab] = useState<'recommendations' | 'history'>('recommendations');
+  const [busySettlementKey, setBusySettlementKey] = useState<string | null>(null);
 
   const balances = calculateMemberBalances(expenses, splits, approvedMembers);
   const recommendations = calculateSettlementRecommendations(balances, settlements, trip.base_currency);
@@ -139,10 +140,11 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           ) : (
             recommendations.map((recommendation, index) => {
               const isAdmin = currentMember.role === 'admin';
+              const settlementKey = `${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`;
 
               return (
                 <div
-                  key={`${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`}
+                  key={settlementKey}
                   id={`recommendation-card-${index}`}
                   className="bg-[#1a1d23] border border-slate-800 rounded-3xl p-4 flex flex-col gap-3"
                 >
@@ -172,16 +174,26 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                     <button
                       type="button"
                       id={`btn-settle-${recommendation.from_member_id}-${recommendation.to_member_id}`}
-                      onClick={() => onMarkSettlementPaid(
-                        recommendation.from_member_id,
-                        recommendation.to_member_id,
-                        recommendation.amount,
-                        recommendation.currency
-                      )}
-                      className="min-h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+                      onClick={async () => {
+                        setBusySettlementKey(settlementKey);
+                        try {
+                          await onMarkSettlementPaid(
+                            recommendation.from_member_id,
+                            recommendation.to_member_id,
+                            recommendation.amount,
+                            recommendation.currency
+                          );
+                        } catch (error) {
+                          console.error(error);
+                        } finally {
+                          setBusySettlementKey(null);
+                        }
+                      }}
+                      disabled={busySettlementKey === settlementKey}
+                      className="min-h-11 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      Mark as paid
+                      {busySettlementKey === settlementKey ? 'Saving...' : 'Mark as paid'}
                     </button>
                   ) : (
                     <p className="text-xs text-slate-500 leading-normal">

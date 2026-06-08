@@ -1,6 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { db } from './lib/storage';
-import { Trip, Member, Expense, ExpenseSplit, Settlement, Currency } from './types';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BottomNav, TabType } from './components/BottomNav';
 import { DashboardTab } from './components/DashboardTab';
 import { ExpensesTab } from './components/ExpensesTab';
@@ -8,167 +6,175 @@ import { BalancesTab } from './components/BalancesTab';
 import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
-import { 
-  Compass, 
-  Plus, 
-  UserPlus, 
-  Clock, 
-  X, 
+import { Currency } from './types';
+import { isSupabaseConfigured } from './lib/supabase';
+import {
+  approveMember,
+  createTripWithAdmin,
+  loadMemberSession,
+  PhaseOneWorkspace,
+  rejectMember,
+  removeMember,
+  requestJoinByInvite,
+} from './lib/tripRepository';
+import {
   AlertOctagon,
-  ArrowLeft
+  ArrowLeft,
+  Clock,
+  Compass,
+  Plus,
+  UserPlus,
+  X,
 } from 'lucide-react';
 
-export default function App() {
-  // DB re-render notifier state
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+const MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
 
-  // Active Context States
-  const [activeTripId, setActiveTripId] = useState<string | null>(null);
-  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
-  
-  // Navigation
+export default function App() {
+  const [workspace, setWorkspace] = useState<PhaseOneWorkspace | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
 
-  // Input states for Access / Sign-in Screens
   const [inviteInput, setInviteInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [joinSuccessCode, setJoinSuccessCode] = useState<string | null>(null);
 
-  // States to trigger Create Trip screen
   const [isCreatingTripView, setIsCreatingTripView] = useState(false);
   const [newTripName, setNewTripName] = useState('');
   const [newTripAdminName, setNewTripAdminName] = useState('');
   const [newTripBaseCurrency, setNewTripBaseCurrency] = useState<Currency>('CNY');
   const [createTripError, setCreateTripError] = useState<string | null>(null);
 
-  // Expense modal helpers
   const [selectedExpenseIdForDetail, setSelectedExpenseIdForDetail] = useState<string | null>(null);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
 
-  // Load database items reactively
-  const rawState = db.getRawState();
-  const trips = rawState.trips;
-  const allMembers = rawState.members;
-  const allExpenses = rawState.expenses;
-  const allSplits = rawState.expense_splits;
-  const allSettlements = rawState.settlements;
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  // Active details
-  const activeTrip = trips.find(t => t.id === activeTripId);
-  const tripMembers = activeTrip ? allMembers.filter(m => m.trip_id === activeTripId) : [];
-  const currentMember = activeTrip ? tripMembers.find(m => m.id === currentMemberId) : null;
-  const tripExpenses = activeTrip ? allExpenses.filter(e => e.trip_id === activeTripId) : [];
-  const tripSplits = activeTrip ? allSplits : []; // Splits filtered inside components by expense
-  const tripSettlements = activeTrip ? allSettlements.filter(s => s.trip_id === activeTripId) : [];
+  const activeTrip = workspace?.trip ?? null;
+  const currentMember = workspace?.currentMember ?? null;
+  const tripMembers = workspace?.members ?? [];
 
-  // Deep linking and Seeding logic
+  const saveAccessToken = (accessToken: string | undefined) => {
+    if (accessToken) {
+      localStorage.setItem(MEMBER_ACCESS_TOKEN_KEY, accessToken);
+    }
+  };
+
+  const clearAccessToken = () => {
+    localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+  };
+
+  const reloadWorkspace = useCallback(async (accessTokenOverride?: string) => {
+    const accessToken = accessTokenOverride ?? localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY);
+    if (!accessToken) {
+      setWorkspace(null);
+      return;
+    }
+
+    setIsWorkspaceLoading(true);
+    try {
+      const nextWorkspace = await loadMemberSession(accessToken);
+      setWorkspace(nextWorkspace);
+      saveAccessToken(nextWorkspace.currentMember.access_token);
+      setAppError(null);
+    } catch (error) {
+      console.error(error);
+      setWorkspace(null);
+      clearAccessToken();
+      setAppError(error instanceof Error ? error.message : 'Could not restore your trip access.');
+    } finally {
+      setIsWorkspaceLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    // 1. Detect Deep Linking from URL Parameters (e.g. ?invite=GRAD26)
     const params = new URLSearchParams(window.location.search);
     const inviteParam = params.get('invite');
     if (inviteParam) {
-      setInviteInput(inviteParam);
-      // Auto toggle to landing view
+      setInviteInput(inviteParam.toUpperCase());
       setIsCreatingTripView(false);
     }
+  }, []);
 
-    // 2. Default to seeding the first trip GRAD26 if nothing was set, for extreme ease of evaluation
-    const storedTripId = localStorage.getItem('tripbalance_active_trip_id');
-    const storedMemberId = localStorage.getItem('tripbalance_current_member_id');
+  useEffect(() => {
+    let cancelled = false;
 
-    if (storedTripId && db.getTrip(storedTripId)) {
-      setActiveTripId(storedTripId);
-      if (storedMemberId && db.getMember(storedMemberId)?.trip_id === storedTripId) {
-        setCurrentMemberId(storedMemberId);
-      } else {
-        // Fallback to first member of this trip
-        const membersOfTrip = db.listMembers(storedTripId);
-        if (membersOfTrip.length > 0) {
-          setCurrentMemberId(membersOfTrip[0].id);
+    async function bootstrap() {
+      if (!isSupabaseConfigured) {
+        setIsBootstrapping(false);
+        return;
+      }
+
+      setIsBootstrapping(true);
+      try {
+        const accessToken = localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY);
+        if (accessToken) {
+          const nextWorkspace = await loadMemberSession(accessToken);
+          if (cancelled) return;
+          setWorkspace(nextWorkspace);
+          saveAccessToken(nextWorkspace.currentMember.access_token);
+        }
+        setAppError(null);
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          clearAccessToken();
+          setWorkspace(null);
+          setAppError(error instanceof Error ? error.message : 'Could not restore your trip access.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false);
         }
       }
-    } else {
-      // Setup GRAD26 as preloaded trip default
-      const defaultTrip = db.getTrip('trip-grad-26');
-      if (defaultTrip) {
-        setActiveTripId(defaultTrip.id);
-        // Default to admin Aryn
-        setCurrentMemberId('mem-aryn');
-      }
     }
-  }, [refreshTrigger]);
 
-  // Database helper methods mapping to UI
-  const handleResetDB = () => {
-    db.resetToDefault();
-    localStorage.removeItem('tripbalance_active_trip_id');
-    localStorage.removeItem('tripbalance_current_member_id');
-    setActiveTripId('trip-grad-26');
-    setCurrentMemberId('mem-aryn');
-    setActiveTab('dashboard');
-    setIsCreatingTripView(false);
-    setSelectedExpenseIdForDetail(null);
-    setIsAddingExpense(false);
-    setIsSideMenuOpen(false);
-    setInviteInput('');
-    setDisplayNameInput('');
-    setJoinError(null);
-    setRefreshTrigger(prev => prev + 1);
-  };
+    bootstrap();
 
-  const handleSelectTripAndMember = (tripId: string | null, memberId: string | null) => {
-    if (tripId) {
-      localStorage.setItem('tripbalance_active_trip_id', tripId);
-      setActiveTripId(tripId);
-      if (memberId) {
-        localStorage.setItem('tripbalance_current_member_id', memberId);
-        setCurrentMemberId(memberId);
-      } else {
-        localStorage.removeItem('tripbalance_current_member_id');
-        setCurrentMemberId(null);
-      }
-    } else {
-      localStorage.removeItem('tripbalance_active_trip_id');
-      localStorage.removeItem('tripbalance_current_member_id');
-      setActiveTripId(null);
-      setCurrentMemberId(null);
-    }
-    setRefreshTrigger(prev => prev + 1);
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const handleCreateTripSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateTripSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setCreateTripError(null);
+    setActionError(null);
 
     if (!newTripName.trim()) {
       setCreateTripError('Trip name is required');
       return;
     }
     if (!newTripAdminName.trim()) {
-      setCreateTripError('Admin displayed name is required');
+      setCreateTripError('Admin display name is required');
       return;
     }
 
-    const { trip, admin } = db.createTrip(
-      newTripName.trim(),
-      newTripAdminName.trim(),
-      newTripBaseCurrency
-    );
+    try {
+      const { member } = await createTripWithAdmin(
+        newTripName.trim(),
+        newTripBaseCurrency,
+        newTripAdminName.trim()
+      );
 
-    // Save and redirect
-    handleSelectTripAndMember(trip.id, admin.id);
-    setNewTripName('');
-    setNewTripAdminName('');
-    setIsCreatingTripView(false);
-    setActiveTab('dashboard');
+      saveAccessToken(member.access_token);
+      setNewTripName('');
+      setNewTripAdminName('');
+      setIsCreatingTripView(false);
+      setActiveTab('dashboard');
+      await reloadWorkspace(member.access_token);
+    } catch (error) {
+      console.error(error);
+      setCreateTripError(error instanceof Error ? error.message : 'Could not create trip.');
+    }
   };
 
-  const handleJoinTripSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleJoinTripSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setJoinError(null);
-    setJoinSuccessCode(null);
+    setActionError(null);
 
     if (!inviteInput.trim()) {
       setJoinError('Please provide an invite code');
@@ -179,134 +185,77 @@ export default function App() {
       return;
     }
 
-    const matchTrip = db.getTripByInviteCode(inviteInput);
-    if (!matchTrip) {
-      setJoinError('Trip not found. Double check your entered invite code!');
+    try {
+      const { member } = await requestJoinByInvite(inviteInput.trim(), displayNameInput.trim());
+      saveAccessToken(member.access_token);
+      setDisplayNameInput('');
+      setActiveTab('dashboard');
+      await reloadWorkspace(member.access_token);
+    } catch (error) {
+      console.error(error);
+      setJoinError(error instanceof Error ? error.message : 'Could not request access.');
+    }
+  };
+
+  const runAdminAction = async (action: (adminAccessToken: string) => Promise<void>) => {
+    setActionError(null);
+    const adminAccessToken = currentMember?.access_token;
+    if (!adminAccessToken) {
+      setActionError('Current member access token is missing.');
       return;
     }
 
-    // Verify if display name is already in use
-    const membersOfTrip = db.listMembers(matchTrip.id);
-    const isDuplicate = membersOfTrip.some(
-      m => m.display_name.trim().toLowerCase() === displayNameInput.trim().toLowerCase()
-    );
-    if (isDuplicate) {
-      setJoinError('This name is already used by an active member on this trip.');
-      return;
+    try {
+      await action(adminAccessToken);
+      await reloadWorkspace(adminAccessToken);
+    } catch (error) {
+      console.error(error);
+      setActionError(error instanceof Error ? error.message : 'Action failed.');
+      throw error;
     }
-
-    // Submit pending request
-    const member = db.requestJoin(matchTrip.id, displayNameInput.trim());
-    
-    // Select this trip and logged-in member
-    handleSelectTripAndMember(matchTrip.id, member.id);
-    setJoinSuccessCode(matchTrip.invite_code);
-    setDisplayNameInput('');
   };
 
-  // --- ACTIONS FOR TRIP MEMBERS ---
-  const handleCreateExpense = (
-    title: string,
-    amount: number,
-    currency: Currency,
-    exchangeRate: number,
-    convertedAmount: number,
-    paidByMemberId: string,
-    expenseDate: string,
-    notes: string,
-    splitsList: { member_id: string; amount_owed: number }[]
-  ) => {
-    if (!activeTripId || !currentMemberId) return;
-    db.createExpense(
-      activeTripId,
-      title,
-      amount,
-      currency,
-      exchangeRate,
-      convertedAmount,
-      paidByMemberId,
-      expenseDate,
-      notes,
-      currentMemberId,
-      splitsList
-    );
-    setRefreshTrigger(prev => prev + 1);
+  const handleApproveMember = async (memberId: string) => {
+    await runAdminAction((adminAccessToken) => approveMember(adminAccessToken, memberId));
   };
 
-  const handleUpdateExpense = (
-    expenseId: string,
-    title: string,
-    amount: number,
-    currency: Currency,
-    exchangeRate: number,
-    convertedAmount: number,
-    paidByMemberId: string,
-    expenseDate: string,
-    notes: string,
-    splitsList: { member_id: string; amount_owed: number }[]
-  ) => {
-    db.updateExpense(
-      expenseId,
-      title,
-      amount,
-      currency,
-      exchangeRate,
-      convertedAmount,
-      paidByMemberId,
-      expenseDate,
-      notes,
-      splitsList
-    );
-    setRefreshTrigger(prev => prev + 1);
+  const handleRejectMember = async (memberId: string) => {
+    await runAdminAction((adminAccessToken) => rejectMember(adminAccessToken, memberId));
   };
 
-  const handleDeleteExpense = (expenseId: string) => {
-    db.deleteExpense(expenseId);
-    setRefreshTrigger(prev => prev + 1);
+  const handleRemoveMember = async (memberId: string) => {
+    await runAdminAction((adminAccessToken) => removeMember(adminAccessToken, memberId));
   };
 
-  const handleMarkSettlementPaid = (
-    fromMemberId: string,
-    toMemberId: string,
-    amount: number,
-    currency: Currency
-  ) => {
-    if (!activeTripId) return;
-    const settlement = db.createSettlement(activeTripId, fromMemberId, toMemberId, amount, currency);
-    db.markSettlementAsPaid(settlement.id);
-    setRefreshTrigger(prev => prev + 1);
+  const handleUnavailableExpenseAction = async () => {
+    setActionError('Expense persistence is not implemented in Phase 1.');
   };
 
-  // --- ACTIONS FOR ADMIN (Approve, reject, remove) ---
-  const handleApproveMember = (memberId: string) => {
-    db.approveMember(memberId);
-    setRefreshTrigger(prev => prev + 1);
-  };
-
-  const handleRejectMember = (memberId: string) => {
-    db.rejectMember(memberId);
-    setRefreshTrigger(prev => prev + 1);
-  };
-
-  const handleRemoveMember = (memberId: string) => {
-    db.removeMember(memberId);
-    setRefreshTrigger(prev => prev + 1);
-  };
-
-  // Leave Trip back to landing screen
   const handleLeaveTrip = () => {
-    handleSelectTripAndMember(null, null);
+    clearAccessToken();
+    setWorkspace(null);
     setIsCreatingTripView(false);
     setIsSideMenuOpen(false);
+    setSelectedExpenseIdForDetail(null);
+    setIsAddingExpense(false);
+    setActiveTab('dashboard');
   };
+
+  const renderCenteredMessage = (title: string, message: string) => (
+    <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-4 flex-1 bg-[#121418]">
+      <div className="w-14 h-14 bg-indigo-600/15 border border-indigo-500/25 rounded-2xl flex items-center justify-center text-indigo-300">
+        <Compass className="w-7 h-7" />
+      </div>
+      <div>
+        <h1 className="text-lg font-bold text-white font-display">{title}</h1>
+        <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">{message}</p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[#090b0e] flex flex-col md:py-6 items-center select-none font-sans">
-      
-      {/* Device wrapper to emulate visual mobile scope in development */}
       <div className="w-full max-w-md bg-[#121418] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden min-h-screen md:min-h-[840px] flex flex-col relative">
-        
-        {/* Mock phone status notches */}
         <div className="bg-[#090b0e] text-slate-400 text-[10px] font-mono px-6 py-1.5 shrink-0 flex justify-between select-none items-center border-b border-slate-900/45">
           <span>17:10 pm</span>
           <div className="w-24 h-4 bg-[#050607] rounded-full border border-slate-905 mx-auto hidden md:block" />
@@ -322,32 +271,40 @@ export default function App() {
           <>
             <AppHeader
               trip={activeTrip}
-              currentMember={currentMember ?? null}
+              currentMember={currentMember}
               onMenuOpen={() => setIsSideMenuOpen(true)}
             />
             <SideMenu
               isOpen={isSideMenuOpen}
               trip={activeTrip}
-              members={tripMembers}
-              currentMemberId={currentMemberId}
+              currentMember={currentMember}
               onClose={() => setIsSideMenuOpen(false)}
-              onSelectMember={(mId) => handleSelectTripAndMember(activeTripId, mId)}
-              onResetDB={handleResetDB}
               onLeaveTrip={handleLeaveTrip}
               onAdminTools={() => setActiveTab('members')}
             />
           </>
         )}
 
-        {/* Inner View content routing */}
         <div className={`flex-1 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
           activeTrip && currentMember && currentMember.status === 'approved' ? 'mb-16' : ''
         }`}>
-          
-          {/* SCREEN TYPE 1: LANDING SCREEN */}
-          {!activeTrip && !isCreatingTripView && (
+          {!isSupabaseConfigured && renderCenteredMessage(
+            'Supabase is not configured',
+            'Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local, then run the Phase 1 migration.'
+          )}
+
+          {isSupabaseConfigured && isBootstrapping && renderCenteredMessage(
+            'Loading SaiHat',
+            'Restoring your trip access from this browser.'
+          )}
+
+          {isSupabaseConfigured && !isBootstrapping && appError && !activeTrip && renderCenteredMessage(
+            'Could not restore trip access',
+            appError
+          )}
+
+          {isSupabaseConfigured && !isBootstrapping && !activeTrip && !isCreatingTripView && (
             <div className="px-5 py-8 flex flex-col gap-8 flex-1 justify-center animate-fade-in bg-[#121418]">
-              
               <div className="text-center">
                 <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-md mb-3.5 accent-glow">
                   <Compass className="w-8 h-8 text-white stroke-[2.5]" />
@@ -355,13 +312,12 @@ export default function App() {
                 <h1 className="text-3xl font-extrabold font-display text-white tracking-tight leading-none uppercase">
                   TripBalance
                 </h1>
-                <p className="text-xs text-slate-500 font-medium font-sans mt-2 max-w-sm mx-auto">
-                  Effortless expense splitting and multi-currency settling for teams and families on the run. Supports AED, CNY and KZT.
+                <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
+                  Private shared trip access with invite codes and admin approval.
                 </p>
               </div>
 
-              {/* Form 1: JOIN TRIP */}
-              <form onSubmit={handleJoinTripSubmit} className="bg-[#1a1d23] border border-slate-805 border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
+              <form onSubmit={handleJoinTripSubmit} className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
                 <div className="border-b border-slate-800 pb-2.5">
                   <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                     Join Shared Trip
@@ -369,7 +325,7 @@ export default function App() {
                 </div>
 
                 {joinError && (
-                  <div className="bg-rose-950/40 border border-rose-900/30 text-rose-350 p-2.5 rounded-xl text-[11px] font-sans flex items-start gap-1.5 leading-snug">
+                  <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug">
                     <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>{joinError}</span>
                   </div>
@@ -385,9 +341,9 @@ export default function App() {
                       id="input-join-invite-code"
                       required
                       value={inviteInput}
-                      onChange={e => setInviteInput(e.target.value.toUpperCase())}
+                      onChange={event => setInviteInput(event.target.value.toUpperCase())}
                       placeholder="e.g. GRAD26"
-                      className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none shadow-xs"
+                      className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
 
@@ -400,9 +356,9 @@ export default function App() {
                       id="input-join-display-name"
                       required
                       value={displayNameInput}
-                      onChange={e => setDisplayNameInput(e.target.value)}
-                      placeholder="e.g. Bob, Alice"
-                      className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none shadow-xs"
+                      onChange={event => setDisplayNameInput(event.target.value)}
+                      placeholder="e.g. Aryn"
+                      className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -410,23 +366,19 @@ export default function App() {
                 <button
                   type="submit"
                   id="btn-join-submit"
-                  className="w-full bg-indigo-600 hover:bg-[#5334f5] text-white font-bold py-3 px-4 rounded-xl text-xs shadow-xs transition-colors mt-1.5 flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full bg-indigo-600 hover:bg-[#5334f5] text-white font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>Request Trip Access</span>
                 </button>
               </form>
 
-              {/* Bottom Creator Toggle */}
               <div className="text-center flex flex-col gap-3.5 mt-2">
-                <span className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">
-                  OR
-                </span>
-                
+                <span className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">OR</span>
                 <button
                   id="btn-goto-create-trip"
                   onClick={() => setIsCreatingTripView(true)}
-                  className="bg-transparent hover:bg-slate-800/10 text-indigo-400 border border-indigo-500/20 border-dashed py-3.5 rounded-2xl text-xs font-bold leading-none tracking-tight flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="bg-transparent hover:bg-slate-800/10 text-indigo-400 border border-indigo-500/20 border-dashed py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-4.5 h-4.5" />
                   <span>Create Brand New Trip</span>
@@ -435,15 +387,13 @@ export default function App() {
             </div>
           )}
 
-          {/* SCREEN TYPE 2: CREATE TRIP VIEW */}
-          {isCreatingTripView && !activeTrip && (
+          {isSupabaseConfigured && !isBootstrapping && isCreatingTripView && !activeTrip && (
             <div className="px-5 py-8 flex flex-col gap-6 flex-1 justify-center animate-fade-in bg-[#121418]">
-              
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setIsCreatingTripView(false)}
-                  className="p-1 px-2.5 bg-slate-800 border border-slate-700/80 rounded-xl text-xs text-slate-350 font-semibold flex items-center hover:bg-slate-750 cursor-pointer"
+                  className="p-1 px-2.5 bg-slate-800 border border-slate-700/80 rounded-xl text-xs text-slate-300 font-semibold flex items-center hover:bg-slate-750 cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5 mr-0.5" />
                   <span>Back</span>
@@ -452,15 +402,15 @@ export default function App() {
 
               <div>
                 <h1 className="text-2xl font-bold font-display text-white tracking-tight">
-                  Design Your Travel
+                  Create trip
                 </h1>
-                <p className="text-xs text-slate-505 text-slate-400 mt-1">
-                  Kickstart your shared budget database. Add and balances on the fly.
+                <p className="text-xs text-slate-400 mt-1">
+                  Start a shared trip space and invite your group.
                 </p>
               </div>
 
               {createTripError && (
-                <div className="bg-rose-950/40 border border-rose-900/30 text-rose-350 p-2.5 rounded-xl text-xs flex items-start gap-1">
+                <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-xs flex items-start gap-1">
                   <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{createTripError}</span>
                 </div>
@@ -469,31 +419,31 @@ export default function App() {
               <form onSubmit={handleCreateTripSubmit} className="bg-[#1a1d23] border border-slate-800/60 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Trip / Destiny Name *
+                    Trip Name *
                   </label>
                   <input
                     type="text"
                     required
                     id="input-create-trip-name"
                     value={newTripName}
-                    onChange={e => setNewTripName(e.target.value)}
-                    placeholder="e.g. Sanya Graduation Tour, Dubai Shopping"
-                    className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-205 text-slate-200 focus:border-indigo-500 focus:outline-none"
+                    onChange={event => setNewTripName(event.target.value)}
+                    placeholder="e.g. Graduation Trip"
+                    className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Your Display Name (Admin) *
+                    Your Display Name *
                   </label>
                   <input
                     type="text"
                     required
                     id="input-create-admin-name"
                     value={newTripAdminName}
-                    onChange={e => setNewTripAdminName(e.target.value)}
-                    placeholder="e.g. Aryn, Sergey"
-                    className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-205 text-slate-200 focus:border-indigo-500 focus:outline-none"
+                    onChange={event => setNewTripAdminName(event.target.value)}
+                    placeholder="e.g. Aryn"
+                    className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
 
@@ -504,8 +454,8 @@ export default function App() {
                   <select
                     value={newTripBaseCurrency}
                     id="select-create-base-currency"
-                    onChange={e => setNewTripBaseCurrency(e.target.value as Currency)}
-                    className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-202 text-slate-200 focus:border-indigo-500 focus:outline-none"
+                    onChange={event => setNewTripBaseCurrency(event.target.value as Currency)}
+                    className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-200 focus:border-indigo-500 focus:outline-none"
                   >
                     <option value="CNY">CNY (Chinese Yuan)</option>
                     <option value="AED">AED (Emirati Dirham)</option>
@@ -516,94 +466,67 @@ export default function App() {
                 <button
                   type="submit"
                   id="btn-create-trip-submit"
-                  className="w-full bg-indigo-600 hover:bg-[#5334f5] text-white font-bold py-3 px-4 rounded-xl text-xs shadow-xs transition-colors mt-2 text-center cursor-pointer"
+                  className="w-full bg-indigo-600 hover:bg-[#5334f5] text-white font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-2 text-center cursor-pointer"
                 >
-                  Create Trip & Go
+                  Create Trip
                 </button>
               </form>
             </div>
           )}
 
-          {/* SCREEN TYPE 3: PENDING APPROVAL SCREEN (ACCESS CONTROL) */}
           {activeTrip && currentMember && currentMember.status === 'pending' && (
             <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 animate-fade-in bg-[#121418]">
-              <div className="w-16 h-16 bg-amber-955 bg-amber-950/40 text-amber-500 rounded-full border border-amber-900/40 flex items-center justify-center animate-pulse">
+              <div className="w-16 h-16 bg-amber-950/40 text-amber-500 rounded-full border border-amber-900/40 flex items-center justify-center">
                 <Clock className="w-8 h-8 stroke-[2.5]" />
               </div>
-
               <div>
-                <h1 className="text-lg font-bold text-white font-display">
-                  Access Pending Approval
-                </h1>
+                <h1 className="text-lg font-bold text-white font-display">Access pending</h1>
                 <p id="pending-screen-msg" className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
-                  Your request to join <strong>"{activeTrip.name}"</strong> as <strong>"{currentMember.display_name}"</strong> is pending admin approval.
+                  Your request to join <strong>{activeTrip.name}</strong> as <strong>{currentMember.display_name}</strong> is waiting for admin approval.
                 </p>
-                <div className="bg-[#1a1d23] border border-slate-800 rounded-2xl p-4 mt-5 text-left text-[11px] leading-relaxed select-text text-slate-400 max-w-sm text-center">
-                  <div className="font-sans text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                    Trip Invite Code
-                  </div>
-                  <strong className="text-xs text-slate-200 font-mono tracking-widest">{activeTrip.invite_code}</strong>
-                </div>
               </div>
-
-              <div className="flex flex-col gap-2 w-full max-w-xs mt-3">
-                <div className="text-[10px] text-slate-500 italic font-mono mb-2">
-                  Open the menu and switch to <strong>"Aryn (Admin)"</strong> to approve this request in the MVP tester flow.
-                </div>
-                
-                <button
-                  id="btn-pending-back-landing"
-                  onClick={handleLeaveTrip}
-                  className="bg-[#1a1d23] hover:bg-[#20242b] text-slate-255 text-slate-300 font-bold border border-slate-800 py-3 rounded-xl text-xs shadow-sm cursor-pointer"
-                >
-                  Go back to Landing Screen
-                </button>
-              </div>
+              <button
+                id="btn-pending-back-landing"
+                onClick={handleLeaveTrip}
+                className="w-full max-w-xs bg-[#1a1d23] hover:bg-[#20242b] text-slate-300 font-bold border border-slate-800 py-3 rounded-xl text-xs cursor-pointer"
+              >
+                Leave trip
+              </button>
             </div>
           )}
 
-          {/* SCREEN TYPE 4: REJECTED ACCESS SCREEN */}
           {activeTrip && currentMember && currentMember.status === 'rejected' && (
             <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 animate-fade-in bg-[#121418]">
               <div className="w-16 h-16 bg-rose-950/30 text-rose-500 rounded-full border border-rose-900/30 flex items-center justify-center">
                 <X className="w-8 h-8 stroke-[2.5]" />
               </div>
-
               <div>
-                <h1 className="text-lg font-bold text-white font-display">
-                  Access Request Rejected
-                </h1>
-                <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed leading-normal">
-                  Your request to join <strong>"{activeTrip.name}"</strong> has been rejected by the admin.
+                <h1 className="text-lg font-bold text-white font-display">Access rejected</h1>
+                <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
+                  Your request to join <strong>{activeTrip.name}</strong> was rejected by an admin.
                 </p>
               </div>
-
               <button
                 id="btn-rejected-leave-trip"
                 onClick={handleLeaveTrip}
-                className="w-full max-w-xs bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold py-3 rounded-xl text-xs transition-colors cursor-pointer"
+                className="w-full max-w-xs bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold py-3 rounded-xl text-xs cursor-pointer"
               >
                 Exit Workspace
               </button>
             </div>
           )}
 
-          {/* SCREEN TYPE 5: REMOVED ACCESS SCREEN */}
           {activeTrip && currentMember && currentMember.status === 'removed' && (
             <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 animate-fade-in bg-[#121418]">
               <div className="w-16 h-16 bg-amber-950/30 text-amber-500 rounded-full border border-amber-900/30 flex items-center justify-center">
                 <AlertOctagon className="w-8 h-8 stroke-[2.5]" />
               </div>
-
               <div>
-                <h1 className="text-lg font-bold text-white font-display">
-                  Member Profile Blocked
-                </h1>
+                <h1 className="text-lg font-bold text-white font-display">Member removed</h1>
                 <p className="text-xs text-slate-400 mt-2 max-w-xs leading-normal">
-                  You have been removed from this trip by the administrator.
+                  You have been removed from this trip by an admin.
                 </p>
               </div>
-
               <button
                 id="btn-removed-leave-trip"
                 onClick={handleLeaveTrip}
@@ -614,17 +537,21 @@ export default function App() {
             </div>
           )}
 
-          {/* SCREEN TYPE 6: APPROVED MEMBER WORKSPACE (MAIN APP) */}
           {activeTrip && currentMember && currentMember.status === 'approved' && (
             <div className="flex-1 flex flex-col bg-[#121418]">
-              {/* Dynamic Tabs routing based on activeTab */}
+              {(actionError || isWorkspaceLoading) && (
+                <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400">
+                  {actionError ?? 'Syncing latest trip data...'}
+                </div>
+              )}
+
               <div className="flex-1 overflow-y-auto">
                 {activeTab === 'dashboard' && (
                   <DashboardTab
                     trip={activeTrip}
                     currentMember={currentMember}
-                    expenses={tripExpenses}
-                    splits={tripSplits}
+                    expenses={[]}
+                    splits={[]}
                     members={tripMembers}
                     onAddExpenseClick={() => {
                       setIsAddingExpense(true);
@@ -635,7 +562,7 @@ export default function App() {
                       setIsAddingExpense(false);
                       setActiveTab('expenses');
                     }}
-                    onChangeTab={(t) => setActiveTab(t)}
+                    onChangeTab={(tab) => setActiveTab(tab)}
                   />
                 )}
 
@@ -643,12 +570,12 @@ export default function App() {
                   <ExpensesTab
                     trip={activeTrip}
                     currentMember={currentMember}
-                    expenses={tripExpenses}
-                    splits={tripSplits}
+                    expenses={[]}
+                    splits={[]}
                     members={tripMembers}
-                    onCreateExpense={handleCreateExpense}
-                    onUpdateExpense={handleUpdateExpense}
-                    onDeleteExpense={handleDeleteExpense}
+                    onCreateExpense={handleUnavailableExpenseAction}
+                    onUpdateExpense={handleUnavailableExpenseAction}
+                    onDeleteExpense={handleUnavailableExpenseAction}
                     selectedExpenseIdForDetail={selectedExpenseIdForDetail}
                     onSetSelectedExpenseId={setSelectedExpenseIdForDetail}
                     isAddingExpense={isAddingExpense}
@@ -660,11 +587,11 @@ export default function App() {
                   <BalancesTab
                     trip={activeTrip}
                     currentMember={currentMember}
-                    expenses={tripExpenses}
-                    splits={tripSplits}
+                    expenses={[]}
+                    splits={[]}
                     members={tripMembers}
-                    settlements={tripSettlements}
-                    onMarkSettlementPaid={handleMarkSettlementPaid}
+                    settlements={[]}
+                    onMarkSettlementPaid={handleUnavailableExpenseAction}
                   />
                 )}
 
@@ -683,17 +610,15 @@ export default function App() {
           )}
         </div>
 
-        {/* Floating bottom sticky navigation bar for active approved workers */}
         {activeTrip && currentMember && currentMember.status === 'approved' && (
           <BottomNav
             activeTab={activeTab}
-            onChangeTab={(t) => {
-              setActiveTab(t);
-              // Clear temporary modal inputs
+            onChangeTab={(tab) => {
+              setActiveTab(tab);
               setSelectedExpenseIdForDetail(null);
               setIsAddingExpense(false);
             }}
-            pendingRequestsCount={tripMembers.filter(m => m.status === 'pending').length}
+            pendingRequestsCount={tripMembers.filter(member => member.status === 'pending').length}
             showAdminBadge={currentMember.role === 'admin'}
           />
         )}

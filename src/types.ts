@@ -17,6 +17,7 @@ export interface Member {
   display_name: string;
   role: MemberRole;
   status: MemberStatus;
+  access_token?: string;
   created_at: string;
   approved_at?: string;
   removed_at?: string;
@@ -53,6 +54,7 @@ export interface Settlement {
   amount: number; // in base currency
   currency: Currency; // usually matching trip base currency
   status: 'pending' | 'paid';
+  created_by_member_id?: string;
   created_at: string;
   paid_at?: string;
 }

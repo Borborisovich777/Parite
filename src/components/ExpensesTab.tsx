@@ -36,7 +36,7 @@ interface ExpensesTabProps {
     expenseDate: string,
     notes: string,
     splitsList: { member_id: string; amount_owed: number }[]
-  ) => void;
+  ) => void | Promise<void>;
   onUpdateExpense: (
     expenseId: string,
     title: string,
@@ -48,8 +48,8 @@ interface ExpensesTabProps {
     expenseDate: string,
     notes: string,
     splitsList: { member_id: string; amount_owed: number }[]
-  ) => void;
-  onDeleteExpense: (expenseId: string) => void;
+  ) => void | Promise<void>;
+  onDeleteExpense: (expenseId: string) => void | Promise<void>;
   selectedExpenseIdForDetail: string | null;
   onSetSelectedExpenseId: (id: string | null) => void;
   isAddingExpense: boolean;
@@ -93,6 +93,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const [formError, setFormError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const amountValue = parseFloat(formAmount || '0');
   const rateValue = parseFloat(formExchangeRate || '1');
@@ -306,8 +307,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     return customSplitsToVerify;
   };
 
-  const handleFormSubmit = (event: React.FormEvent) => {
+  const handleFormSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (isSaving) return;
 
     if (!validateBasicFields()) return;
 
@@ -327,41 +329,57 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       return;
     }
 
-    if (editingExpense) {
-      onUpdateExpense(
-        editingExpense.id,
-        formTitle.trim(),
-        amount,
-        formCurrency,
-        exchangeRate,
-        convertedAmount,
-        formPayer,
-        formDate,
-        formNotes.trim(),
-        splitsList
-      );
-    } else {
-      onCreateExpense(
-        formTitle.trim(),
-        amount,
-        formCurrency,
-        exchangeRate,
-        convertedAmount,
-        formPayer,
-        formDate,
-        formNotes.trim(),
-        splitsList
-      );
-    }
+    setIsSaving(true);
+    try {
+      if (editingExpense) {
+        await onUpdateExpense(
+          editingExpense.id,
+          formTitle.trim(),
+          amount,
+          formCurrency,
+          exchangeRate,
+          convertedAmount,
+          formPayer,
+          formDate,
+          formNotes.trim(),
+          splitsList
+        );
+      } else {
+        await onCreateExpense(
+          formTitle.trim(),
+          amount,
+          formCurrency,
+          exchangeRate,
+          convertedAmount,
+          formPayer,
+          formDate,
+          formNotes.trim(),
+          splitsList
+        );
+      }
 
-    closeForm();
+      closeForm();
+    } catch (error) {
+      console.error(error);
+      setFormError(error instanceof Error ? error.message : 'Could not save this expense');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!selectedExpenseIdForDetail) return;
-    onDeleteExpense(selectedExpenseIdForDetail);
-    setShowDeleteConfirm(false);
-    onSetSelectedExpenseId(null);
+    setIsSaving(true);
+    try {
+      await onDeleteExpense(selectedExpenseIdForDetail);
+      setShowDeleteConfirm(false);
+      onSetSelectedExpenseId(null);
+    } catch (error) {
+      console.error(error);
+      setFormError(error instanceof Error ? error.message : 'Could not delete this expense');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const toggleParticipant = (memberId: string) => {
@@ -764,9 +782,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 <button
                   type="submit"
                   id="btn-expense-submit"
+                  disabled={isSaving}
                   className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-white font-bold text-sm cursor-pointer accent-glow"
                 >
-                  {editingExpense ? 'Save changes' : 'Save expense'}
+                  {isSaving ? 'Saving...' : editingExpense ? 'Save changes' : 'Save expense'}
                 </button>
               </>
             )}
@@ -1013,9 +1032,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 type="button"
                 id="btn-delete-expense-submit"
                 onClick={handleDelete}
-                className="bg-rose-600 hover:bg-rose-700 text-white font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
+                disabled={isSaving}
+                className="bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
               >
-                Delete
+                {isSaving ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>

@@ -6,9 +6,9 @@ interface MembersTabProps {
   trip: Trip;
   currentMember: Member;
   members: Member[];
-  onApproveMember: (memberId: string) => void;
-  onRejectMember: (memberId: string) => void;
-  onRemoveMember: (memberId: string) => void;
+  onApproveMember: (memberId: string) => void | Promise<void>;
+  onRejectMember: (memberId: string) => void | Promise<void>;
+  onRemoveMember: (memberId: string) => void | Promise<void>;
 }
 
 export const MembersTab: React.FC<MembersTabProps> = ({
@@ -21,6 +21,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [activeCategory, setActiveCategory] = useState<'approved' | 'requests' | 'removed'>('approved');
+  const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
 
   const isAdmin = currentMember.role === 'admin';
   const approvedMembers = members.filter(member => member.status === 'approved');
@@ -39,6 +40,17 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   const handleCopyLink = () => {
     const joinLink = `${window.location.origin}${window.location.pathname}?invite=${trip.invite_code}`;
     navigator.clipboard.writeText(joinLink).then(showCopied);
+  };
+
+  const runMemberAction = async (memberId: string, action: () => void | Promise<void>) => {
+    setBusyMemberId(memberId);
+    try {
+      await action();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setBusyMemberId(null);
+    }
   };
 
   return (
@@ -172,9 +184,10 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                     id={`btn-remove-member-${member.id}`}
                     onClick={() => {
                       if (confirm(`Remove ${member.display_name}? Historical expenses paid or split by them remain intact.`)) {
-                        onRemoveMember(member.id);
+                        runMemberAction(member.id, () => onRemoveMember(member.id));
                       }
                     }}
+                    disabled={busyMemberId === member.id}
                     className="text-rose-300 bg-rose-950/35 hover:bg-rose-950/55 border border-rose-900/40 p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
                     title="Remove member"
                   >
@@ -215,7 +228,8 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     id={`btn-reject-request-${request.id}`}
-                    onClick={() => onRejectMember(request.id)}
+                    onClick={() => runMemberAction(request.id, () => onRejectMember(request.id))}
+                    disabled={busyMemberId === request.id}
                     className="bg-rose-950/35 border border-rose-900/40 text-rose-200 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserX className="w-3.5 h-3.5" />
@@ -224,7 +238,8 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 
                   <button
                     id={`btn-approve-request-${request.id}`}
-                    onClick={() => onApproveMember(request.id)}
+                    onClick={() => runMemberAction(request.id, () => onApproveMember(request.id))}
+                    disabled={busyMemberId === request.id}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserCheck className="w-3.5 h-3.5" />
@@ -259,7 +274,8 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => onApproveMember(member.id)}
+                  onClick={() => runMemberAction(member.id, () => onApproveMember(member.id))}
+                  disabled={busyMemberId === member.id}
                   className="text-[10px] bg-[#121418] border border-slate-800 text-slate-200 hover:bg-slate-800 rounded-xl px-3 py-2 font-bold cursor-pointer"
                 >
                   Approve
