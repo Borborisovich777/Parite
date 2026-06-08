@@ -1,0 +1,5 @@
+{
+  "name": "TripBalance",
+  "description": "A mobile-first expense sharing and settlement calculator for group travels with multi-currency support (AED, CNY, KZT).",
+  "requestFramePermissions": []
+}
