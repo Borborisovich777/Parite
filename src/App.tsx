@@ -55,6 +55,7 @@ export default function App() {
   const activeTrip = workspace?.trip ?? null;
   const currentMember = workspace?.currentMember ?? null;
   const tripMembers = workspace?.members ?? [];
+  const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
 
   const saveAccessToken = (accessToken: string | undefined) => {
     if (accessToken) {
@@ -286,7 +287,7 @@ export default function App() {
         )}
 
         <div className={`flex-1 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
-          activeTrip && currentMember && currentMember.status === 'approved' ? 'mb-16' : ''
+            isApprovedWorkspace ? 'mb-16' : ''
         }`}>
           {!isSupabaseConfigured && renderCenteredMessage(
             'Supabase is not configured',
@@ -303,7 +304,7 @@ export default function App() {
             appError
           )}
 
-          {isSupabaseConfigured && !isBootstrapping && !activeTrip && !isCreatingTripView && (
+          {isSupabaseConfigured && !isBootstrapping && !activeTrip && !currentMember && !isCreatingTripView && (
             <div className="px-5 py-8 flex flex-col gap-8 flex-1 justify-center animate-fade-in bg-[#121418]">
               <div className="text-center">
                 <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-md mb-3.5 accent-glow">
@@ -387,7 +388,7 @@ export default function App() {
             </div>
           )}
 
-          {isSupabaseConfigured && !isBootstrapping && isCreatingTripView && !activeTrip && (
+          {isSupabaseConfigured && !isBootstrapping && isCreatingTripView && !activeTrip && !currentMember && (
             <div className="px-5 py-8 flex flex-col gap-6 flex-1 justify-center animate-fade-in bg-[#121418]">
               <div className="flex items-center gap-1.5">
                 <button
@@ -474,7 +475,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTrip && currentMember && currentMember.status === 'pending' && (
+          {currentMember && currentMember.status === 'pending' && (
             <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 animate-fade-in bg-[#121418]">
               <div className="w-16 h-16 bg-amber-950/40 text-amber-500 rounded-full border border-amber-900/40 flex items-center justify-center">
                 <Clock className="w-8 h-8 stroke-[2.5]" />
@@ -482,7 +483,7 @@ export default function App() {
               <div>
                 <h1 className="text-lg font-bold text-white font-display">Access pending</h1>
                 <p id="pending-screen-msg" className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
-                  Your request to join <strong>{activeTrip.name}</strong> as <strong>{currentMember.display_name}</strong> is waiting for admin approval.
+                  Your request as <strong>{currentMember.display_name}</strong> is waiting for admin approval.
                 </p>
               </div>
               <button
@@ -495,7 +496,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTrip && currentMember && currentMember.status === 'rejected' && (
+          {currentMember && currentMember.status === 'rejected' && (
             <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 animate-fade-in bg-[#121418]">
               <div className="w-16 h-16 bg-rose-950/30 text-rose-500 rounded-full border border-rose-900/30 flex items-center justify-center">
                 <X className="w-8 h-8 stroke-[2.5]" />
@@ -503,7 +504,7 @@ export default function App() {
               <div>
                 <h1 className="text-lg font-bold text-white font-display">Access rejected</h1>
                 <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
-                  Your request to join <strong>{activeTrip.name}</strong> was rejected by an admin.
+                  Your request was rejected by an admin.
                 </p>
               </div>
               <button
@@ -516,7 +517,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTrip && currentMember && currentMember.status === 'removed' && (
+          {currentMember && currentMember.status === 'removed' && (
             <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 animate-fade-in bg-[#121418]">
               <div className="w-16 h-16 bg-amber-950/30 text-amber-500 rounded-full border border-amber-900/30 flex items-center justify-center">
                 <AlertOctagon className="w-8 h-8 stroke-[2.5]" />
@@ -535,6 +536,11 @@ export default function App() {
                 Exit Workspace
               </button>
             </div>
+          )}
+
+          {currentMember && currentMember.status === 'approved' && !activeTrip && renderCenteredMessage(
+            'Trip access unavailable',
+            'Your member session is approved, but the trip data could not be loaded.'
           )}
 
           {activeTrip && currentMember && currentMember.status === 'approved' && (

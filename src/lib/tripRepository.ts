@@ -2,7 +2,7 @@ import { Currency, Member, Trip } from '../types';
 import { requireSupabase } from './supabase';
 
 export interface PhaseOneWorkspace {
-  trip: Trip;
+  trip: Trip | null;
   currentMember: Member;
   members: Member[];
 }
@@ -17,6 +17,14 @@ function mapTrip(row: Row): Trip {
     invite_code: row.invite_code,
     created_at: row.created_at,
   };
+}
+
+function mapNullableTrip(row: unknown): Trip | null {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    return null;
+  }
+
+  return mapTrip(row as Row);
 }
 
 function mapMember(row: Row): Member {
@@ -65,7 +73,7 @@ export async function createTripWithAdmin(
 export async function requestJoinByInvite(
   inviteCode: string,
   displayName: string
-): Promise<{ trip: Trip; member: Member }> {
+): Promise<{ trip: Trip | null; member: Member }> {
   const client = requireSupabase();
   const { data, error } = await client.rpc('request_join_by_invite', {
     invite_code_input: inviteCode,
@@ -76,7 +84,7 @@ export async function requestJoinByInvite(
 
   const row = unwrapJsonObject(data, 'request_join_by_invite');
   return {
-    trip: mapTrip(row.trip),
+    trip: mapNullableTrip(row.trip),
     member: mapMember(row.member),
   };
 }
@@ -91,7 +99,7 @@ export async function loadMemberSession(accessToken: string): Promise<PhaseOneWo
 
   const row = unwrapJsonObject(data, 'load_member_session');
   return {
-    trip: mapTrip(row.trip),
+    trip: mapNullableTrip(row.trip),
     currentMember: mapMember(row.member),
     members: Array.isArray(row.members) ? row.members.map(mapMember) : [],
   };
