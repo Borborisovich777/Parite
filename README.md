@@ -1,6 +1,6 @@
-# SaiHat / TripBalance
+# Parité
 
-SaiHat / TripBalance is a mobile-first Vite React app for private trip membership and shared expense splitting. Phase 1 uses Supabase only for trips, members, invite codes, admin approval, and browser access-token restore.
+Parité is a mobile-first Vite React app for private trip membership and shared expense splitting. Phase 1 uses Supabase only for trips, members, invite codes, admin approval, and browser access-token restore.
 
 Expense persistence is intentionally disabled in Phase 1. The Add Expense UI remains in the app for later phases.
 
@@ -29,7 +29,7 @@ Do not paste a filename like `supabase/migrations/202606090001_phase1_contract_r
 1. In Mac Terminal, go to this project folder:
 
 ```bash
-cd /Users/nurtore.arynuruly/Projects/SaiHat
+cd /Users/nurtore.arynuruly/Projects/Parité
 ```
 
 2. Copy the full migration SQL into your Mac clipboard.
