@@ -14,6 +14,7 @@ export type MemberStatus = 'pending' | 'approved' | 'rejected' | 'removed';
 export interface Member {
   id: string;
   trip_id: string;
+  user_id?: string;
   display_name: string;
   role: MemberRole;
   status: MemberStatus;
@@ -44,6 +45,16 @@ export interface ExpenseSplit {
   expense_id: string;
   member_id: string;
   amount_owed: number; // in base currency
+}
+
+export interface ExchangeRate {
+  id: string;
+  trip_id: string;
+  from_currency: Currency;
+  to_currency: Currency;
+  rate: number;
+  updated_by_member_id: string;
+  updated_at: string;
 }
 
 export interface Settlement {

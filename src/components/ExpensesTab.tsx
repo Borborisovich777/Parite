@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Trip, Member, Expense, ExpenseSplit, Currency } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate } from '../types';
 import {
   calculateConvertedAmount,
   calculateEqualSplits,
   validateCustomSplits,
 } from '../lib/calculations';
+import { isDecimalInputValue, parsePositiveDecimal } from '../lib/decimalInput';
 import {
   AlertCircle,
   ArrowLeft,
@@ -25,6 +26,7 @@ interface ExpensesTabProps {
   currentMember: Member;
   expenses: Expense[];
   splits: ExpenseSplit[];
+  exchangeRates?: ExchangeRate[];
   members: Member[];
   onCreateExpense: (
     title: string,
@@ -63,6 +65,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   currentMember,
   expenses,
   splits,
+  exchangeRates = [],
   members,
   onCreateExpense,
   onUpdateExpense,
@@ -73,6 +76,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   onSetAddingExpense,
 }) => {
   const approvedMembers = members.filter(m => m.status === 'approved');
+  const tripBaseCurrency = trip?.base_currency ?? 'CNY';
+  const safeExchangeRates = useMemo(
+    () => Array.isArray(exchangeRates) ? exchangeRates : [],
+    [exchangeRates]
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -82,8 +90,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const [formTitle, setFormTitle] = useState('');
   const [formAmount, setFormAmount] = useState('');
-  const [formCurrency, setFormCurrency] = useState<Currency>(trip.base_currency);
-  const [formExchangeRate, setFormExchangeRate] = useState('1');
+  const [formCurrency, setFormCurrency] = useState<Currency>(tripBaseCurrency);
+  const [useCustomExchangeRate, setUseCustomExchangeRate] = useState(false);
+  const [customExchangeRateInput, setCustomExchangeRateInput] = useState('');
   const [formPayer, setFormPayer] = useState(currentMember.id);
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formParticipants, setFormParticipants] = useState<string[]>(approvedMembers.map(m => m.id));
@@ -95,20 +104,43 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  const amountValue = parseFloat(formAmount || '0');
-  const rateValue = parseFloat(formExchangeRate || '1');
-  const convertedAmount = calculateConvertedAmount(
-    Number.isFinite(amountValue) ? amountValue : 0,
-    Number.isFinite(rateValue) ? rateValue : 1
-  );
+  const amountValue = parseFloat(formAmount);
+  const hasValidAmount = Number.isFinite(amountValue) && amountValue > 0;
+  const displayAmount = Number.isFinite(amountValue) ? amountValue : 0;
+  const isBaseCurrencyExpense = formCurrency === tripBaseCurrency;
+  const tripExchangeRate = useMemo(() => {
+    if (formCurrency === tripBaseCurrency) return 1;
+    if (!formCurrency || !tripBaseCurrency) return null;
+
+    const match = safeExchangeRates.find(rate => (
+      rate.from_currency === formCurrency &&
+      rate.to_currency === tripBaseCurrency &&
+      Number.isFinite(rate.rate) &&
+      rate.rate > 0
+    ));
+
+    return match ? match.rate : null;
+  }, [formCurrency, safeExchangeRates, tripBaseCurrency]);
+  const customExchangeRate = parsePositiveDecimal(customExchangeRateInput);
+  const activeExchangeRate = isBaseCurrencyExpense
+    ? 1
+    : useCustomExchangeRate
+      ? customExchangeRate
+      : tripExchangeRate;
+  const hasValidRate = activeExchangeRate !== null;
+  const rateValue = activeExchangeRate ?? Number.NaN;
+  const convertedAmount = hasValidAmount && hasValidRate
+    ? calculateConvertedAmount(amountValue, rateValue)
+    : Number.NaN;
+  const hasValidConvertedAmount = Number.isFinite(convertedAmount);
 
   const participantNames = formParticipants
     .map(id => approvedMembers.find(member => member.id === id)?.display_name)
     .filter(Boolean);
 
   const equalPreviewSplits = useMemo(
-    () => calculateEqualSplits(convertedAmount, formParticipants),
-    [convertedAmount, formParticipants]
+    () => hasValidConvertedAmount ? calculateEqualSplits(convertedAmount, formParticipants) : [],
+    [convertedAmount, formParticipants, hasValidConvertedAmount]
   );
 
   const filteredExpenses = expenses.filter(expense => {
@@ -125,43 +157,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const detailSplits = detailExpense ? splits.filter(s => s.expense_id === detailExpense.id) : [];
   const detailPayer = detailExpense ? approvedMembers.find(m => m.id === detailExpense.paid_by_member_id) : null;
 
-  const getDefaultExchangeRate = (from: Currency, to: Currency): number => {
-    if (from === to) return 1;
-
-    const match = [...expenses]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .find(e => e.currency === from);
-
-    if (match) return match.exchange_rate_to_base;
-
-    if (to === 'CNY') {
-      if (from === 'AED') return 1.95;
-      if (from === 'KZT') return 0.016;
-    }
-    if (to === 'AED') {
-      if (from === 'CNY') return 0.51;
-      if (from === 'KZT') return 0.0082;
-    }
-    if (to === 'KZT') {
-      if (from === 'CNY') return 62.5;
-      if (from === 'AED') return 121.5;
-    }
-    return 1;
-  };
-
   useEffect(() => {
-    if (formCurrency === trip.base_currency) {
-      setFormExchangeRate('1');
+    if (formCurrency === tripBaseCurrency) {
+      setUseCustomExchangeRate(false);
+      setCustomExchangeRateInput('');
       return;
     }
 
-    if (editingExpense && editingExpense.currency === formCurrency) {
-      setFormExchangeRate(editingExpense.exchange_rate_to_base.toString());
-      return;
+    if (!editingExpense || editingExpense.currency !== formCurrency) {
+      setUseCustomExchangeRate(false);
+      setCustomExchangeRateInput('');
     }
-
-    setFormExchangeRate(getDefaultExchangeRate(formCurrency, trip.base_currency).toString());
-  }, [formCurrency, trip.base_currency, editingExpense]);
+  }, [formCurrency, tripBaseCurrency, editingExpense]);
 
   const initializeCustomSplits = (participantIds: string[]) => {
     const custom: Record<string, string> = {};
@@ -188,8 +195,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     const activeIds = approvedMembers.map(m => m.id);
     setFormTitle('');
     setFormAmount('');
-    setFormCurrency(trip.base_currency);
-    setFormExchangeRate('1');
+    setFormCurrency(tripBaseCurrency);
+    setUseCustomExchangeRate(false);
+    setCustomExchangeRateInput('');
     setFormPayer(currentMember.id);
     setFormDate(new Date().toISOString().split('T')[0]);
     setFormParticipants(activeIds);
@@ -225,7 +233,22 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormTitle(expense.title);
     setFormAmount(expense.amount.toString());
     setFormCurrency(expense.currency);
-    setFormExchangeRate(expense.exchange_rate_to_base.toString());
+    if (expense.currency === tripBaseCurrency) {
+      setUseCustomExchangeRate(false);
+      setCustomExchangeRateInput('');
+    } else {
+      const currentTripRate = safeExchangeRates.find(rate => (
+        rate.from_currency === expense.currency &&
+        rate.to_currency === tripBaseCurrency &&
+        Number.isFinite(rate.rate) &&
+        rate.rate > 0
+      ));
+      const matchesTripRate = currentTripRate
+        ? Math.abs(currentTripRate.rate - expense.exchange_rate_to_base) < 0.000001
+        : false;
+      setUseCustomExchangeRate(!matchesTripRate);
+      setCustomExchangeRateInput(matchesTripRate ? '' : expense.exchange_rate_to_base.toString());
+    }
     setFormPayer(expense.paid_by_member_id);
     setFormDate(expense.expense_date);
     setFormNotes(expense.notes || '');
@@ -234,7 +257,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormCustomSplits(custom);
     setFormStep('basic');
     setShowCustomizeSplit(!isSplitEqual);
-    setShowMoreOptions(expense.currency !== trip.base_currency || Boolean(expense.notes));
+    setShowMoreOptions(expense.currency !== tripBaseCurrency || Boolean(expense.notes));
     setFormError(null);
     onSetAddingExpense(false);
     onSetSelectedExpenseId(null);
@@ -263,12 +286,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const handleContinueToPreview = () => {
     if (!validateBasicFields()) return;
+
+    if (formCurrency !== tripBaseCurrency && !hasValidRate) {
+      setFormError(
+        useCustomExchangeRate
+          ? 'Enter a custom exchange rate greater than zero'
+          : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
+      );
+      setShowMoreOptions(true);
+      setFormStep('preview');
+      return;
+    }
+
+    setFormError(null);
     setFormStep('preview');
   };
 
   const buildSplitsList = (): { member_id: string; amount_owed: number }[] | null => {
     if (formParticipants.length === 0) {
       setFormError('At least one participant must be selected');
+      return null;
+    }
+
+    if (!hasValidConvertedAmount) {
+      setFormError('Enter a valid amount and exchange rate first');
       return null;
     }
 
@@ -299,7 +340,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     if (!validateCustomSplits(convertedAmount, customSplitsToVerify)) {
       const sum = customSplitsToVerify.reduce((total, item) => total + item.amount_owed, 0);
       setFormError(
-        `Custom splits total ${sum.toFixed(2)} ${trip.base_currency}, but the converted amount is ${convertedAmount.toFixed(2)} ${trip.base_currency}`
+        `Custom splits total ${sum.toFixed(2)} ${tripBaseCurrency}, but the converted amount is ${hasValidConvertedAmount ? convertedAmount.toFixed(2) : 'not ready'} ${tripBaseCurrency}`
       );
       return null;
     }
@@ -314,9 +355,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     if (!validateBasicFields()) return;
 
     const amount = parseFloat(formAmount);
-    const exchangeRate = parseFloat(formExchangeRate);
-    if (Number.isNaN(exchangeRate) || exchangeRate <= 0) {
-      setFormError('Exchange rate must be greater than zero');
+    const exchangeRate = activeExchangeRate;
+    if (exchangeRate === null || !Number.isFinite(exchangeRate) || exchangeRate <= 0) {
+      setFormError(
+        useCustomExchangeRate
+          ? 'Exchange rate must be greater than zero'
+          : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
+      );
       setShowMoreOptions(true);
       setFormStep('preview');
       return;
@@ -515,12 +560,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     </div>
                     <div className="text-right shrink-0">
                       <p className="font-mono text-lg font-bold text-white">
-                        {amountValue.toFixed(2)} {formCurrency}
+                        {displayAmount.toFixed(2)} {formCurrency}
                       </p>
-                      {formCurrency !== trip.base_currency && (
-                        <p className="text-[10px] text-indigo-300 font-mono mt-1">
-                          {convertedAmount.toFixed(2)} {trip.base_currency}
-                        </p>
+                      {formCurrency !== tripBaseCurrency && (
+                        <>
+                          <p className="text-[10px] text-indigo-300 font-mono mt-1">
+                            {hasValidConvertedAmount ? `${convertedAmount.toFixed(2)} ${tripBaseCurrency}` : 'Enter rate'}
+                          </p>
+                          {hasValidRate && (
+                            <p className="text-[10px] text-slate-500 font-mono mt-1">
+                              {useCustomExchangeRate ? 'Custom' : 'Trip'} rate {rateValue.toString()}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -534,7 +586,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <p className="text-slate-500 mb-1">Each person owes</p>
                       <p className="text-slate-100 font-mono font-bold">
                         {formSplitMethod === 'equal'
-                          ? `${firstEqualSplit.toFixed(2)} ${trip.base_currency}`
+                          ? hasValidConvertedAmount
+                            ? `${firstEqualSplit.toFixed(2)} ${tripBaseCurrency}`
+                            : 'Enter rate'
                           : 'Custom'}
                       </p>
                     </div>
@@ -644,7 +698,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             <div key={item.member_id} className="flex items-center justify-between text-xs text-slate-400">
                               <span>{member?.display_name ?? 'Participant'}</span>
                               <span className="font-mono font-bold text-slate-100">
-                                {item.amount_owed.toFixed(2)} {trip.base_currency}
+                                {item.amount_owed.toFixed(2)} {tripBaseCurrency}
                               </span>
                             </div>
                           );
@@ -672,7 +726,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                                   placeholder="0.00"
                                   className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
                                 />
-                                <span className="text-[10px] font-mono text-slate-500">{trip.base_currency}</span>
+                                <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
                               </span>
                             </label>
                           );
@@ -682,7 +736,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           <span className="font-mono text-slate-200">
                             {formParticipants.reduce((sum, id) => sum + parseFloat(formCustomSplits[id] || '0'), 0).toFixed(2)}
                             {' / '}
-                            {convertedAmount.toFixed(2)} {trip.base_currency}
+                            {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
                           </span>
                         </div>
                       </div>
@@ -708,27 +762,93 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       />
                     </div>
 
-                    {formCurrency !== trip.base_currency && (
+                    {formCurrency !== tripBaseCurrency && (
                       <div>
                         <label className="block text-xs font-semibold text-slate-300 mb-2">
                           Exchange rate
                         </label>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-slate-400">1 {formCurrency} =</span>
-                          <input
-                            type="number"
-                            step="0.000001"
-                            required
-                            id="input-exchange-rate"
-                            value={formExchangeRate}
-                            onChange={event => setFormExchangeRate(event.target.value)}
-                            className="min-w-0 flex-1 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 font-mono text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
-                          />
-                          <span className="text-xs font-mono text-slate-400">{trip.base_currency}</span>
-                        </div>
-                        <p className="text-[11px] text-indigo-300 mt-2 font-mono">
-                          {amountValue.toFixed(2)} {formCurrency} approx {convertedAmount.toFixed(2)} {trip.base_currency}
-                        </p>
+                        {!useCustomExchangeRate && tripExchangeRate && (
+                          <div className="rounded-2xl bg-[#121418] border border-slate-800 px-4 py-3">
+                            <p className="text-xs text-slate-300">
+                              Using trip rate:
+                            </p>
+                            <p className="font-mono text-sm text-indigo-300 mt-1">
+                              1 {formCurrency} = {tripExchangeRate.toString()} {tripBaseCurrency}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUseCustomExchangeRate(true);
+                                setCustomExchangeRateInput('');
+                              }}
+                              className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
+                            >
+                              Use custom exchange rate
+                            </button>
+                          </div>
+                        )}
+
+                        {!useCustomExchangeRate && !tripExchangeRate && (
+                          <div className="rounded-2xl bg-[#121418] border border-slate-800 px-4 py-3">
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              No trip exchange rate set for {formCurrency} -&gt; {tripBaseCurrency}. Ask admin to set it or enter a custom rate.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUseCustomExchangeRate(true);
+                                setCustomExchangeRateInput('');
+                              }}
+                              className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
+                            >
+                              Enter custom rate
+                            </button>
+                          </div>
+                        )}
+
+                        {useCustomExchangeRate && (
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono text-slate-400">1 {formCurrency} =</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                id="input-exchange-rate"
+                                value={customExchangeRateInput}
+                                onChange={event => {
+                                  const nextValue = event.target.value;
+                                  if (isDecimalInputValue(nextValue)) {
+                                    setCustomExchangeRateInput(nextValue);
+                                  }
+                                }}
+                                placeholder="Required"
+                                className="min-w-0 flex-1 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 font-mono text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
+                              />
+                              <span className="text-xs font-mono text-slate-400">{tripBaseCurrency}</span>
+                            </div>
+                            {tripExchangeRate && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUseCustomExchangeRate(false);
+                                  setCustomExchangeRateInput('');
+                                }}
+                                className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
+                              >
+                                Use trip rate
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {hasValidConvertedAmount ? (
+                          <p className="text-[11px] text-indigo-300 mt-2 font-mono">
+                            {displayAmount.toFixed(2)} {formCurrency} approx {convertedAmount.toFixed(2)} {tripBaseCurrency}
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            Enter a valid amount and rate to preview the converted total.
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -863,9 +983,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         <span className="font-mono text-sm font-bold text-slate-100 block">
                           {expense.amount.toFixed(2)} {expense.currency}
                         </span>
-                        {expense.currency !== trip.base_currency && (
+                        {expense.currency !== tripBaseCurrency && (
                           <span className="text-[10px] text-slate-500 font-mono block mt-1">
-                            {expense.converted_amount.toFixed(2)} {trip.base_currency}
+                            {Number.isFinite(expense.converted_amount) ? expense.converted_amount.toFixed(2) : '--'} {tripBaseCurrency}
                           </span>
                         )}
                       </span>
@@ -914,16 +1034,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       {detailExpense.amount.toFixed(2)} {detailExpense.currency}
                     </p>
                   </div>
-                  {detailExpense.currency !== trip.base_currency && (
+                  {detailExpense.currency !== tripBaseCurrency && (
                     <div className="text-right">
                       <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
                         Converted
                       </p>
                       <p className="font-mono text-sm font-bold text-indigo-300 mt-1">
-                        {detailExpense.converted_amount.toFixed(2)} {trip.base_currency}
+                        {Number.isFinite(detailExpense.converted_amount) ? detailExpense.converted_amount.toFixed(2) : '--'} {tripBaseCurrency}
                       </p>
                       <p className="text-[10px] text-slate-500 font-mono mt-1">
-                        Rate {detailExpense.exchange_rate_to_base.toFixed(4)}
+                        Rate {Number.isFinite(detailExpense.exchange_rate_to_base) ? detailExpense.exchange_rate_to_base.toFixed(4) : '--'}
                       </p>
                     </div>
                   )}
@@ -957,7 +1077,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           {participant ? (participant.id === currentMember.id ? 'You' : participant.display_name) : 'Removed member'}
                         </span>
                         <span className="font-mono font-bold text-slate-100">
-                          {split.amount_owed.toFixed(2)} {trip.base_currency}
+                          {Number.isFinite(split.amount_owed) ? split.amount_owed.toFixed(2) : '--'} {tripBaseCurrency}
                         </span>
                       </div>
                     );

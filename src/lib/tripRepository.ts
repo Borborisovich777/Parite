@@ -1,13 +1,21 @@
-import { Currency, Member, Trip } from '../types';
+import { Currency, ExchangeRate, Expense, ExpenseSplit, Member, Trip } from '../types';
 import { requireSupabase } from './supabase';
 
 export interface PhaseOneWorkspace {
   trip: Trip | null;
-  currentMember: Member;
+  currentMember: Member | null;
   members: Member[];
+  expenses: Expense[];
+  splits: ExpenseSplit[];
+  exchangeRates: ExchangeRate[];
 }
 
 type Row = Record<string, any>;
+
+export const DUPLICATE_DISPLAY_NAME_MESSAGE =
+  'Display name already used in this trip. Use another name or ask the admin to remove or reapprove the previous member.';
+
+export const INVALID_MEMBER_SESSION_MESSAGE = 'Member session not found';
 
 function mapTrip(row: Row): Trip {
   return {
@@ -31,6 +39,7 @@ function mapMember(row: Row): Member {
   return {
     id: row.id,
     trip_id: row.trip_id,
+    user_id: row.user_id ?? undefined,
     display_name: row.display_name,
     role: row.role,
     status: row.status,
@@ -38,6 +47,45 @@ function mapMember(row: Row): Member {
     created_at: row.created_at,
     approved_at: row.approved_at ?? undefined,
     removed_at: row.removed_at ?? undefined,
+  };
+}
+
+function mapExpense(row: Row): Expense {
+  return {
+    id: row.id,
+    trip_id: row.trip_id,
+    title: row.title,
+    amount: Number(row.amount),
+    currency: row.currency,
+    exchange_rate_to_base: Number(row.exchange_rate_to_base),
+    converted_amount: Number(row.converted_amount),
+    paid_by_member_id: row.paid_by_member_id,
+    expense_date: row.expense_date,
+    notes: row.notes ?? '',
+    created_by_member_id: row.created_by_member_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function mapExpenseSplit(row: Row): ExpenseSplit {
+  return {
+    id: row.id,
+    expense_id: row.expense_id,
+    member_id: row.member_id,
+    amount_owed: Number(row.amount_owed),
+  };
+}
+
+function mapExchangeRate(row: Row): ExchangeRate {
+  return {
+    id: row.id,
+    trip_id: row.trip_id,
+    from_currency: row.from_currency,
+    to_currency: row.to_currency,
+    rate: Number(row.rate),
+    updated_by_member_id: row.updated_by_member_id,
+    updated_at: row.updated_at,
   };
 }
 
@@ -49,11 +97,52 @@ function unwrapJsonObject(data: unknown, rpcName: string): Row {
   return data as Row;
 }
 
+function mapWorkspace(row: Row): PhaseOneWorkspace {
+  return {
+    trip: mapNullableTrip(row.trip),
+    currentMember: row.member ? mapMember(row.member) : null,
+    members: Array.isArray(row.members) ? row.members.map(mapMember) : [],
+    expenses: Array.isArray(row.expenses) ? row.expenses.map(mapExpense) : [],
+    splits: Array.isArray(row.splits) ? row.splits.map(mapExpenseSplit) : [],
+    exchangeRates: Array.isArray(row.exchangeRates) ? row.exchangeRates.map(mapExchangeRate) : [],
+  };
+}
+
+function throwSupabaseError(error: unknown): never {
+  if (error && typeof error === 'object') {
+    const row = error as Row;
+    const rawMessage = [
+      row.message,
+      row.details,
+      row.hint,
+      row.code,
+    ].filter(Boolean).join(' ');
+
+    if (
+      row.code === '23505' ||
+      rawMessage.includes('members_trip_display_name_lower_idx') ||
+      rawMessage.toLowerCase().includes('duplicate key')
+    ) {
+      throw new Error(DUPLICATE_DISPLAY_NAME_MESSAGE);
+    }
+
+    const messageParts = [
+      row.message,
+    ].filter(Boolean);
+
+    if (messageParts.length > 0) {
+      throw new Error(messageParts.join(' '));
+    }
+  }
+
+  throw new Error('Supabase request failed.');
+}
+
 export async function createTripWithAdmin(
   name: string,
   baseCurrency: Currency,
   displayName: string
-): Promise<{ trip: Trip; member: Member }> {
+): Promise<PhaseOneWorkspace> {
   const client = requireSupabase();
   const { data, error } = await client.rpc('create_trip_with_admin', {
     trip_name: name,
@@ -61,32 +150,50 @@ export async function createTripWithAdmin(
     display_name: displayName,
   });
 
-  if (error) throw error;
+  if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'create_trip_with_admin');
-  return {
-    trip: mapTrip(row.trip),
-    member: mapMember(row.member),
-  };
+  return mapWorkspace(row);
 }
 
 export async function requestJoinByInvite(
   inviteCode: string,
   displayName: string
-): Promise<{ trip: Trip | null; member: Member }> {
+): Promise<PhaseOneWorkspace> {
   const client = requireSupabase();
   const { data, error } = await client.rpc('request_join_by_invite', {
     invite_code_input: inviteCode,
     display_name: displayName,
   });
 
-  if (error) throw error;
+  if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'request_join_by_invite');
-  return {
-    trip: mapNullableTrip(row.trip),
-    member: mapMember(row.member),
-  };
+  return mapWorkspace(row);
+}
+
+export async function loadAuthWorkspace(memberId?: string | null): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('load_auth_workspace', {
+    member_id_input: memberId ?? null,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'load_auth_workspace');
+  return mapWorkspace(row);
+}
+
+export async function claimLegacyMember(accessToken: string): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('claim_legacy_member', {
+    access_token_input: accessToken,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'claim_legacy_member');
+  return mapWorkspace(row);
 }
 
 export async function loadMemberSession(accessToken: string): Promise<PhaseOneWorkspace> {
@@ -95,42 +202,131 @@ export async function loadMemberSession(accessToken: string): Promise<PhaseOneWo
     access_token_input: accessToken,
   });
 
-  if (error) throw error;
+  if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'load_member_session');
-  return {
-    trip: mapNullableTrip(row.trip),
-    currentMember: mapMember(row.member),
-    members: Array.isArray(row.members) ? row.members.map(mapMember) : [],
-  };
+  return mapWorkspace(row);
 }
 
-export async function approveMember(adminAccessToken: string, memberId: string): Promise<void> {
+export async function approveMember(memberId: string): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.rpc('approve_member', {
-    admin_access_token_input: adminAccessToken,
     member_id_input: memberId,
   });
 
-  if (error) throw error;
+  if (error) throwSupabaseError(error);
 }
 
-export async function rejectMember(adminAccessToken: string, memberId: string): Promise<void> {
+export async function rejectMember(memberId: string): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.rpc('reject_member', {
-    admin_access_token_input: adminAccessToken,
     member_id_input: memberId,
   });
 
-  if (error) throw error;
+  if (error) throwSupabaseError(error);
 }
 
-export async function removeMember(adminAccessToken: string, memberId: string): Promise<void> {
+export async function removeMember(memberId: string): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.rpc('remove_member', {
-    admin_access_token_input: adminAccessToken,
     member_id_input: memberId,
   });
 
-  if (error) throw error;
+  if (error) throwSupabaseError(error);
+}
+
+export async function updateExchangeRate(
+  tripId: string,
+  fromCurrency: Currency,
+  toCurrency: Currency,
+  rate: number
+): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('update_exchange_rate', {
+    trip_id_input: tripId,
+    from_currency_input: fromCurrency,
+    to_currency_input: toCurrency,
+    rate_input: rate,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'update_exchange_rate');
+  return mapWorkspace(row);
+}
+
+export async function createExpenseWithSplits(
+  tripId: string,
+  title: string,
+  amount: number,
+  currency: Currency,
+  exchangeRate: number,
+  convertedAmount: number,
+  paidByMemberId: string,
+  expenseDate: string,
+  notes: string,
+  splitsList: { member_id: string; amount_owed: number }[]
+): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('create_expense_with_splits', {
+    trip_id_input: tripId,
+    title_input: title,
+    amount_input: amount,
+    currency_input: currency,
+    exchange_rate_to_base_input: exchangeRate,
+    converted_amount_input: convertedAmount,
+    paid_by_member_id_input: paidByMemberId,
+    expense_date_input: expenseDate,
+    notes_input: notes,
+    splits_input: splitsList,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'create_expense_with_splits');
+  return mapWorkspace(row);
+}
+
+export async function updateExpenseWithSplits(
+  expenseId: string,
+  title: string,
+  amount: number,
+  currency: Currency,
+  exchangeRate: number,
+  convertedAmount: number,
+  paidByMemberId: string,
+  expenseDate: string,
+  notes: string,
+  splitsList: { member_id: string; amount_owed: number }[]
+): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('update_expense_with_splits', {
+    expense_id_input: expenseId,
+    title_input: title,
+    amount_input: amount,
+    currency_input: currency,
+    exchange_rate_to_base_input: exchangeRate,
+    converted_amount_input: convertedAmount,
+    paid_by_member_id_input: paidByMemberId,
+    expense_date_input: expenseDate,
+    notes_input: notes,
+    splits_input: splitsList,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'update_expense_with_splits');
+  return mapWorkspace(row);
+}
+
+export async function deleteExpense(expenseId: string): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('delete_expense', {
+    expense_id_input: expenseId,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'delete_expense');
+  return mapWorkspace(row);
 }
