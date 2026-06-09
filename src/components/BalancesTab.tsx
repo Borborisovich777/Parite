@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Trip, Member, Expense, ExpenseSplit, Settlement, Currency } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, Settlement, Currency, ExchangeRate } from '../types';
 import { calculateMemberBalances, calculateSettlementRecommendations } from '../lib/calculations';
+import { formatDisplayMoney, getMemberDisplayCurrency } from '../lib/exchangeRates';
 import { CheckCircle2, Clock, History, Scale } from 'lucide-react';
 
 interface BalancesTabProps {
@@ -8,6 +9,7 @@ interface BalancesTabProps {
   currentMember: Member;
   expenses: Expense[];
   splits: ExpenseSplit[];
+  exchangeRates?: ExchangeRate[];
   members: Member[];
   settlements: Settlement[];
   onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number, currency: Currency) => void | Promise<void>;
@@ -18,6 +20,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   currentMember,
   expenses,
   splits,
+  exchangeRates = [],
   members,
   settlements,
   onMarkSettlementPaid,
@@ -29,6 +32,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   const balances = calculateMemberBalances(expenses, splits, approvedMembers);
   const recommendations = calculateSettlementRecommendations(balances, settlements, trip.base_currency);
   const paidSettlementsList = settlements.filter(settlement => settlement.status === 'paid');
+  const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
 
   return (
     <div className="flex flex-col gap-4 pb-24 animate-fade-in px-4 pt-4">
@@ -54,6 +58,13 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
             const isMe = balance.member_id === currentMember.id;
             const isPositive = balance.net_balance > 0.01;
             const isNegative = balance.net_balance < -0.01;
+            const balanceDisplay = formatDisplayMoney(
+              balance.net_balance,
+              trip.base_currency,
+              displayCurrency,
+              exchangeRates,
+              trip.id
+            );
 
             return (
               <div
@@ -72,18 +83,30 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                   </p>
                 </div>
 
-                <div
-                  id={`member-net-balance-${balance.member_id}`}
-                  className={`font-mono text-xs font-bold px-2.5 py-1.5 rounded-xl shrink-0 ${
-                    isPositive
-                      ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                      : isNegative
-                      ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
-                      : 'bg-slate-800 text-slate-300 border border-slate-700'
-                  }`}
-                >
-                  {isPositive ? '+' : ''}
-                  {balance.net_balance.toFixed(2)}
+                <div className="text-right shrink-0">
+                  <div
+                    id={`member-net-balance-${balance.member_id}`}
+                    className={`font-mono text-xs font-bold px-2.5 py-1.5 rounded-xl ${
+                      isPositive
+                        ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                        : isNegative
+                        ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700'
+                    }`}
+                  >
+                    {isPositive ? '+' : ''}
+                    {balanceDisplay.primary}
+                    {balanceDisplay.secondary && (
+                      <span className="block text-[9px] font-mono font-medium opacity-70 mt-0.5">
+                        {balanceDisplay.secondary}
+                      </span>
+                    )}
+                  </div>
+                  {balanceDisplay.helper && (
+                    <p className="text-[10px] text-slate-500 mt-1 max-w-[8rem]">
+                      {balanceDisplay.helper}
+                    </p>
+                  )}
                 </div>
               </div>
             );
@@ -97,13 +120,13 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           onClick={() => setActiveSubTab('recommendations')}
           className={`min-h-11 rounded-xl text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'recommendations'
-              ? 'bg-indigo-600 text-white'
+              ? 'bg-indigo-600 text-slate-950'
               : 'text-slate-500 hover:text-slate-300'
           }`}
         >
           To settle
           {recommendations.length > 0 && (
-            <span className="ml-1.5 bg-rose-500 text-white text-[9px] px-1.5 rounded-full">
+            <span className="ml-1.5 bg-rose-500 text-slate-950 text-[9px] px-1.5 rounded-full">
               {recommendations.length}
             </span>
           )}
@@ -114,7 +137,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           onClick={() => setActiveSubTab('history')}
           className={`min-h-11 rounded-xl text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'history'
-              ? 'bg-indigo-600 text-white'
+              ? 'bg-indigo-600 text-slate-950'
               : 'text-slate-500 hover:text-slate-300'
           }`}
         >
@@ -141,6 +164,13 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
             recommendations.map((recommendation, index) => {
               const isAdmin = currentMember.role === 'admin';
               const settlementKey = `${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`;
+              const recommendationDisplay = formatDisplayMoney(
+                recommendation.amount,
+                trip.base_currency,
+                displayCurrency,
+                exchangeRates,
+                trip.id
+              );
 
               return (
                 <div
@@ -162,11 +192,22 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
 
                     <div className="text-right shrink-0">
                       <p className="font-mono text-base font-bold text-white">
-                        {recommendation.amount.toFixed(2)}
+                        {recommendationDisplay.primary}
                       </p>
-                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                        {recommendation.currency}
-                      </p>
+                      {recommendationDisplay.secondary ? (
+                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          {recommendationDisplay.secondary}
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          {recommendation.currency}
+                        </p>
+                      )}
+                      {recommendationDisplay.helper && (
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          {recommendationDisplay.helper}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -190,7 +231,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                         }
                       }}
                       disabled={busySettlementKey === settlementKey}
-                      className="min-h-11 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+                      className="min-h-11 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-slate-950 font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       {busySettlementKey === settlementKey ? 'Saving...' : 'Mark as paid'}
@@ -219,6 +260,13 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
               .map(settlement => {
                 const fromMember = approvedMembers.find(member => member.id === settlement.from_member_id);
                 const toMember = approvedMembers.find(member => member.id === settlement.to_member_id);
+                const settlementDisplay = formatDisplayMoney(
+                  settlement.amount,
+                  trip.base_currency,
+                  displayCurrency,
+                  exchangeRates,
+                  trip.id
+                );
 
                 return (
                   <div
@@ -239,7 +287,12 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                     </div>
 
                     <div className="text-right font-mono font-bold text-xs shrink-0 text-emerald-300">
-                      {settlement.amount.toFixed(2)} {settlement.currency}
+                      {settlementDisplay.primary}
+                      {settlementDisplay.secondary && (
+                        <span className="block text-[10px] text-slate-500 mt-0.5">
+                          {settlementDisplay.secondary}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

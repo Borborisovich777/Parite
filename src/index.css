@@ -5,26 +5,151 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --font-display: "Outfit", "Inter", sans-serif;
+  --color-indigo-500: #81b29a;
+  --color-indigo-600: #81b29a;
+  --color-indigo-700: #6f9f86;
+  --color-rose-500: #e07a5f;
+  --color-rose-600: #e07a5f;
+  --color-rose-700: #c96750;
+}
+
+:root {
+  --color-page-background: #111827;
+  --color-app-background: #f4f1de;
+  --color-surface: #ffffff;
+  --color-surface-soft: #faf8ec;
+  --color-text: #1f2937;
+  --color-muted: #6b7280;
+  --color-border: rgba(31, 41, 55, 0.14);
+  --color-positive: #81b29a;
+  --color-negative: #e07a5f;
+  --color-background: var(--color-app-background);
 }
 
 body {
   font-family: var(--font-sans);
-  background-color: #0A0A0B;
-  color: #e2e8f0;
+  background-color: var(--color-page-background);
+  color: var(--color-text);
 }
 
 /* Elegant Dark Custom Utilities */
 .accent-glow {
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 0 15px rgba(129, 178, 154, 0.25);
 }
 
 .accent-glow-strong {
-  box-shadow: 0 0 25px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 25px rgba(129, 178, 154, 0.45);
 }
 
 .currency-tag {
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(129, 178, 154, 0.1);
+  border: 1px solid rgba(129, 178, 154, 0.2);
+}
+
+.app-header-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+.bottom-nav-safe {
+  height: calc(68px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tripbalance-shell {
+  color: var(--color-text);
+}
+
+.tripbalance-shell .bg-\[\#121418\],
+.tripbalance-shell .bg-\[\#121418\]\/95 {
+  background-color: var(--color-app-background) !important;
+}
+
+.tripbalance-shell .bg-\[\#1a1d23\],
+.tripbalance-shell .bg-\[\#1a1d23\]\/95,
+.tripbalance-shell .bg-\[\#20242b\],
+.tripbalance-shell .bg-slate-800 {
+  background-color: var(--color-surface) !important;
+}
+
+.tripbalance-shell .bg-slate-700,
+.tripbalance-shell .bg-slate-750,
+.tripbalance-shell .bg-slate-900,
+.tripbalance-shell .bg-\[\#050607\] {
+  background-color: var(--color-surface-soft) !important;
+}
+
+.tripbalance-shell .border-slate-900,
+.tripbalance-shell .border-slate-800,
+.tripbalance-shell .border-slate-800\/80,
+.tripbalance-shell .border-slate-800\/75,
+.tripbalance-shell .border-slate-800\/70,
+.tripbalance-shell .border-slate-800\/60,
+.tripbalance-shell .border-slate-800\/45,
+.tripbalance-shell .border-slate-800\/40,
+.tripbalance-shell .border-slate-800\/30,
+.tripbalance-shell .border-slate-700,
+.tripbalance-shell .border-slate-700\/80 {
+  border-color: var(--color-border) !important;
+}
+
+.tripbalance-shell .text-white,
+.tripbalance-shell .text-slate-100,
+.tripbalance-shell .text-slate-200,
+.tripbalance-shell .text-slate-300 {
+  color: var(--color-text) !important;
+}
+
+.tripbalance-shell .text-slate-400,
+.tripbalance-shell .text-slate-500,
+.tripbalance-shell .text-slate-600 {
+  color: var(--color-muted) !important;
+}
+
+.tripbalance-shell .text-indigo-200,
+.tripbalance-shell .text-indigo-300,
+.tripbalance-shell .text-indigo-400,
+.tripbalance-shell .text-emerald-300,
+.tripbalance-shell .text-emerald-400 {
+  color: #4f7f68 !important;
+}
+
+.tripbalance-shell .text-rose-200,
+.tripbalance-shell .text-rose-300,
+.tripbalance-shell .text-rose-400,
+.tripbalance-shell .text-rose-500 {
+  color: #b85f49 !important;
+}
+
+.tripbalance-shell .bg-indigo-600,
+.tripbalance-shell .bg-emerald-600,
+.tripbalance-shell .bg-\[var\(--color-positive\)\] {
+  background-color: var(--color-positive) !important;
+}
+
+.tripbalance-shell .bg-rose-500,
+.tripbalance-shell .bg-rose-600,
+.tripbalance-shell .bg-\[var\(--color-negative\)\] {
+  background-color: var(--color-negative) !important;
+}
+
+.tripbalance-shell input,
+.tripbalance-shell select,
+.tripbalance-shell textarea {
+  background-color: var(--color-surface) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+.tripbalance-shell input::placeholder,
+.tripbalance-shell textarea::placeholder {
+  color: #9ca3af !important;
+}
+
+.tripbalance-shell button:disabled,
+.tripbalance-shell input:disabled,
+.tripbalance-shell select:disabled,
+.tripbalance-shell textarea:disabled {
+  opacity: 0.58;
 }
 
 /* Hide scrollbars but keep behavior */
@@ -35,5 +160,3 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
-
-

@@ -33,6 +33,7 @@ create table if not exists public.members (
   display_name text not null check (char_length(trim(display_name)) > 0),
   role public.member_role not null default 'member',
   status public.member_status not null default 'pending',
+  display_currency text check (display_currency in ('AED', 'CNY', 'KZT')),
   access_token text not null unique,
   created_at timestamptz not null default now(),
   approved_at timestamptz,
@@ -128,6 +129,7 @@ alter table public.members add column if not exists user_id uuid references auth
 alter table public.members add column if not exists display_name text;
 alter table public.members add column if not exists role public.member_role not null default 'member';
 alter table public.members add column if not exists status public.member_status not null default 'pending';
+alter table public.members add column if not exists display_currency text check (display_currency in ('AED', 'CNY', 'KZT'));
 alter table public.members add column if not exists access_token text;
 alter table public.members add column if not exists created_at timestamptz not null default now();
 alter table public.members add column if not exists approved_at timestamptz;
@@ -910,6 +912,50 @@ begin
 end;
 $$;
 
+create or replace function public.update_member_display_currency(
+  member_id_input uuid,
+  display_currency_input text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_member public.members;
+  normalized_currency text;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in required';
+  end if;
+
+  normalized_currency := nullif(upper(trim(coalesce(display_currency_input, ''))), '');
+
+  if normalized_currency is not null
+     and normalized_currency not in ('AED', 'CNY', 'KZT') then
+    raise exception 'Invalid display currency';
+  end if;
+
+  select *
+  into target_member
+  from public.members
+  where id = member_id_input
+    and user_id = auth.uid();
+
+  if target_member.id is null then
+    raise exception 'You can only update your own display currency for this trip';
+  end if;
+
+  update public.members
+  set display_currency = normalized_currency
+  where id = member_id_input
+    and user_id = auth.uid()
+  returning * into target_member;
+
+  return public.load_auth_workspace(target_member.id);
+end;
+$$;
+
 create or replace function public.create_expense_with_splits(
   trip_id_input uuid,
   title_input text,
@@ -1249,6 +1295,7 @@ grant execute on function public.approve_member(uuid) to authenticated;
 grant execute on function public.reject_member(uuid) to authenticated;
 grant execute on function public.remove_member(uuid) to authenticated;
 grant execute on function public.update_exchange_rate(uuid, public.currency_code, public.currency_code, numeric) to authenticated;
+grant execute on function public.update_member_display_currency(uuid, text) to authenticated;
 grant execute on function public.create_expense_with_splits(uuid, text, numeric, public.currency_code, numeric, numeric, uuid, date, text, jsonb) to authenticated;
 grant execute on function public.update_expense_with_splits(uuid, text, numeric, public.currency_code, numeric, numeric, uuid, date, text, jsonb) to authenticated;
 grant execute on function public.delete_expense(uuid) to authenticated;

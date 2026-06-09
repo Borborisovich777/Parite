@@ -18,6 +18,7 @@ export interface Member {
   display_name: string;
   role: MemberRole;
   status: MemberStatus;
+  display_currency?: Currency | null;
   access_token?: string;
   created_at: string;
   approved_at?: string;

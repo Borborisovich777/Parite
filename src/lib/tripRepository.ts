@@ -1,4 +1,5 @@
 import { Currency, ExchangeRate, Expense, ExpenseSplit, Member, Trip } from '../types';
+import { toCurrency } from './exchangeRates';
 import { requireSupabase } from './supabase';
 
 export interface PhaseOneWorkspace {
@@ -43,6 +44,7 @@ function mapMember(row: Row): Member {
     display_name: row.display_name,
     role: row.role,
     status: row.status,
+    display_currency: row.display_currency ? toCurrency(row.display_currency) : null,
     access_token: row.access_token,
     created_at: row.created_at,
     approved_at: row.approved_at ?? undefined,
@@ -81,8 +83,8 @@ function mapExchangeRate(row: Row): ExchangeRate {
   return {
     id: row.id,
     trip_id: row.trip_id,
-    from_currency: row.from_currency,
-    to_currency: row.to_currency,
+    from_currency: toCurrency(row.from_currency),
+    to_currency: toCurrency(row.to_currency),
     rate: Number(row.rate),
     updated_by_member_id: row.updated_by_member_id,
     updated_at: row.updated_at,
@@ -98,7 +100,7 @@ function unwrapJsonObject(data: unknown, rpcName: string): Row {
 }
 
 function mapWorkspace(row: Row): PhaseOneWorkspace {
-  return {
+  const workspace = {
     trip: mapNullableTrip(row.trip),
     currentMember: row.member ? mapMember(row.member) : null,
     members: Array.isArray(row.members) ? row.members.map(mapMember) : [],
@@ -106,6 +108,13 @@ function mapWorkspace(row: Row): PhaseOneWorkspace {
     splits: Array.isArray(row.splits) ? row.splits.map(mapExpenseSplit) : [],
     exchangeRates: Array.isArray(row.exchangeRates) ? row.exchangeRates.map(mapExchangeRate) : [],
   };
+
+  return workspace;
+}
+
+function mapWorkspaceForRpc(row: Row, source: string): PhaseOneWorkspace {
+  void source;
+  return mapWorkspace(row);
 }
 
 function throwSupabaseError(error: unknown): never {
@@ -153,7 +162,7 @@ export async function createTripWithAdmin(
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'create_trip_with_admin');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'create_trip_with_admin');
 }
 
 export async function requestJoinByInvite(
@@ -169,7 +178,7 @@ export async function requestJoinByInvite(
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'request_join_by_invite');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'request_join_by_invite');
 }
 
 export async function loadAuthWorkspace(memberId?: string | null): Promise<PhaseOneWorkspace> {
@@ -181,7 +190,7 @@ export async function loadAuthWorkspace(memberId?: string | null): Promise<Phase
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'load_auth_workspace');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'load_auth_workspace');
 }
 
 export async function claimLegacyMember(accessToken: string): Promise<PhaseOneWorkspace> {
@@ -193,7 +202,7 @@ export async function claimLegacyMember(accessToken: string): Promise<PhaseOneWo
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'claim_legacy_member');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'claim_legacy_member');
 }
 
 export async function loadMemberSession(accessToken: string): Promise<PhaseOneWorkspace> {
@@ -205,7 +214,7 @@ export async function loadMemberSession(accessToken: string): Promise<PhaseOneWo
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'load_member_session');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'load_member_session');
 }
 
 export async function approveMember(memberId: string): Promise<void> {
@@ -252,7 +261,23 @@ export async function updateExchangeRate(
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'update_exchange_rate');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'update_exchange_rate');
+}
+
+export async function updateMemberDisplayCurrency(
+  memberId: string,
+  displayCurrency: Currency | null
+): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('update_member_display_currency', {
+    member_id_input: memberId,
+    display_currency_input: displayCurrency,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'update_member_display_currency');
+  return mapWorkspaceForRpc(row, 'update_member_display_currency');
 }
 
 export async function createExpenseWithSplits(
@@ -284,7 +309,7 @@ export async function createExpenseWithSplits(
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'create_expense_with_splits');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'create_expense_with_splits');
 }
 
 export async function updateExpenseWithSplits(
@@ -316,7 +341,7 @@ export async function updateExpenseWithSplits(
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'update_expense_with_splits');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'update_expense_with_splits');
 }
 
 export async function deleteExpense(expenseId: string): Promise<PhaseOneWorkspace> {
@@ -328,5 +353,5 @@ export async function deleteExpense(expenseId: string): Promise<PhaseOneWorkspac
   if (error) throwSupabaseError(error);
 
   const row = unwrapJsonObject(data, 'delete_expense');
-  return mapWorkspace(row);
+  return mapWorkspaceForRpc(row, 'delete_expense');
 }

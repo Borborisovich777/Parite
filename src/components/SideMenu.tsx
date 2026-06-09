@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Copy,
@@ -8,7 +8,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Member, Trip } from '../types';
+import { Currency, Member, Trip } from '../types';
+
+const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT'];
 
 interface SideMenuProps {
   isOpen: boolean;
@@ -19,6 +21,7 @@ interface SideMenuProps {
   onLeaveTrip: () => void;
   onAdminTools: () => void;
   onExchangeRates: () => void;
+  onUpdateDisplayCurrency: (displayCurrency: Currency | null) => Promise<void>;
   onLogout: () => void | Promise<void>;
 }
 
@@ -31,9 +34,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   onLeaveTrip,
   onAdminTools,
   onExchangeRates,
+  onUpdateDisplayCurrency,
   onLogout,
 }) => {
   const isAdmin = currentMember?.role === 'admin';
+  const [displayCurrencyInput, setDisplayCurrencyInput] = useState<Currency | ''>(currentMember?.display_currency ?? '');
+  const [isSavingDisplayCurrency, setIsSavingDisplayCurrency] = useState(false);
+  const [displayCurrencyError, setDisplayCurrencyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -45,6 +52,11 @@ export const SideMenu: React.FC<SideMenuProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    setDisplayCurrencyInput(currentMember?.display_currency ?? '');
+    setDisplayCurrencyError(null);
+  }, [currentMember?.display_currency, isOpen]);
 
   if (!isOpen) return null;
 
@@ -71,6 +83,20 @@ export const SideMenu: React.FC<SideMenuProps> = ({
 
   const handleCopyInvite = () => {
     copyText(trip.invite_code).catch(error => console.error(error));
+  };
+
+  const handleSaveDisplayCurrency = async () => {
+    setIsSavingDisplayCurrency(true);
+    setDisplayCurrencyError(null);
+
+    try {
+      await onUpdateDisplayCurrency(displayCurrencyInput || null);
+    } catch (error) {
+      console.error(error);
+      setDisplayCurrencyError(error instanceof Error ? error.message : 'Could not save display currency.');
+    } finally {
+      setIsSavingDisplayCurrency(false);
+    }
   };
 
   return (
@@ -156,6 +182,41 @@ export const SideMenu: React.FC<SideMenuProps> = ({
             </div>
           </section>
 
+          <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
+            <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">
+              Display currency
+            </label>
+            <select
+              value={displayCurrencyInput}
+              onChange={event => setDisplayCurrencyInput(event.target.value as Currency | '')}
+              disabled={!currentMember || isSavingDisplayCurrency}
+              className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-100 px-3 py-2 text-sm font-semibold focus:border-[var(--color-positive)] focus:outline-none disabled:opacity-60"
+            >
+              <option value="">Same as trip base currency</option>
+              {CURRENCIES.map(currency => (
+                <option key={currency} value={currency}>
+                  {currency}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+              Only changes how amounts are shown to you. Trip accounting stays in {trip.base_currency}.
+            </p>
+            {displayCurrencyError && (
+              <p className="text-[11px] text-[var(--color-negative)] mt-2 leading-relaxed">
+                {displayCurrencyError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={handleSaveDisplayCurrency}
+              disabled={!currentMember || isSavingDisplayCurrency || displayCurrencyInput === (currentMember?.display_currency ?? '')}
+              className="mt-3 w-full min-h-10 rounded-2xl bg-[var(--color-positive)] text-slate-950 px-3 py-2 font-bold text-xs cursor-pointer disabled:opacity-60"
+            >
+              {isSavingDisplayCurrency ? 'Saving...' : 'Save display currency'}
+            </button>
+          </section>
+
           <section className="flex flex-col gap-2">
             {isAdmin && currentMember?.status === 'approved' && (
               <>
@@ -194,7 +255,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 onLeaveTrip();
                 onClose();
               }}
-              className="w-full min-h-11 rounded-2xl bg-rose-950/35 border border-rose-900/40 text-rose-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:bg-rose-950/55"
+              className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 flex items-center gap-2 font-bold text-sm cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               Exit workspace

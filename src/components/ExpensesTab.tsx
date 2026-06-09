@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate } from '../types';
 import {
   calculateConvertedAmount,
   calculateEqualSplits,
-  validateCustomSplits,
+  calculateSmartCustomSplits,
 } from '../lib/calculations';
-import { isDecimalInputValue, parsePositiveDecimal } from '../lib/decimalInput';
+import { isDecimalInputValue, isMoneyInputValue, parsePositiveDecimal } from '../lib/decimalInput';
+import { formatDisplayMoney, getMemberDisplayCurrency, getTripExchangeRate } from '../lib/exchangeRates';
 import {
   AlertCircle,
   ArrowLeft,
@@ -77,6 +78,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 }) => {
   const approvedMembers = members.filter(m => m.status === 'approved');
   const tripBaseCurrency = trip?.base_currency ?? 'CNY';
+  const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
   const safeExchangeRates = useMemo(
     () => Array.isArray(exchangeRates) ? exchangeRates : [],
     [exchangeRates]
@@ -103,6 +105,23 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const submitSourceRef = useRef<string | null>(null);
+
+  const setFormStepWithReason = (nextStep: FormStep, reason: string) => {
+    void reason;
+    setFormStep(previousStep => {
+      void previousStep;
+      return nextStep;
+    });
+  };
+
+  const setFormCurrencyWithReason = (nextCurrency: Currency, reason: string) => {
+    void reason;
+    setFormCurrency(previousCurrency => {
+      void previousCurrency;
+      return nextCurrency;
+    });
+  };
 
   const amountValue = parseFloat(formAmount);
   const hasValidAmount = Number.isFinite(amountValue) && amountValue > 0;
@@ -110,17 +129,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const isBaseCurrencyExpense = formCurrency === tripBaseCurrency;
   const tripExchangeRate = useMemo(() => {
     if (formCurrency === tripBaseCurrency) return 1;
-    if (!formCurrency || !tripBaseCurrency) return null;
-
-    const match = safeExchangeRates.find(rate => (
-      rate.from_currency === formCurrency &&
-      rate.to_currency === tripBaseCurrency &&
-      Number.isFinite(rate.rate) &&
-      rate.rate > 0
-    ));
-
+    const match = getTripExchangeRate(safeExchangeRates, trip?.id, formCurrency, tripBaseCurrency);
     return match ? match.rate : null;
-  }, [formCurrency, safeExchangeRates, tripBaseCurrency]);
+  }, [formCurrency, safeExchangeRates, trip?.id, tripBaseCurrency]);
+
   const customExchangeRate = parsePositiveDecimal(customExchangeRateInput);
   const activeExchangeRate = isBaseCurrencyExpense
     ? 1
@@ -142,6 +154,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     () => hasValidConvertedAmount ? calculateEqualSplits(convertedAmount, formParticipants) : [],
     [convertedAmount, formParticipants, hasValidConvertedAmount]
   );
+  const smartCustomSplitResult = useMemo(
+    () => calculateSmartCustomSplits({
+      totalAmount: hasValidConvertedAmount ? convertedAmount : 0,
+      participantIds: formParticipants,
+      manualAmounts: formCustomSplits,
+    }),
+    [convertedAmount, formCustomSplits, formParticipants, hasValidConvertedAmount]
+  );
 
   const filteredExpenses = expenses.filter(expense => {
     const q = searchQuery.toLowerCase();
@@ -156,19 +176,22 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const detailExpense = expenses.find(e => e.id === selectedExpenseIdForDetail);
   const detailSplits = detailExpense ? splits.filter(s => s.expense_id === detailExpense.id) : [];
   const detailPayer = detailExpense ? approvedMembers.find(m => m.id === detailExpense.paid_by_member_id) : null;
+  const detailDisplayAmount = detailExpense
+    ? formatDisplayMoney(detailExpense.converted_amount, tripBaseCurrency, displayCurrency, safeExchangeRates, trip.id)
+    : null;
 
   useEffect(() => {
-    if (formCurrency === tripBaseCurrency) {
-      setUseCustomExchangeRate(false);
-      setCustomExchangeRateInput('');
-      return;
-    }
-
-    if (!editingExpense || editingExpense.currency !== formCurrency) {
+    if (formCurrency === tripBaseCurrency && (useCustomExchangeRate || customExchangeRateInput)) {
       setUseCustomExchangeRate(false);
       setCustomExchangeRateInput('');
     }
-  }, [formCurrency, tripBaseCurrency, editingExpense]);
+  }, [
+    customExchangeRateInput,
+    editingExpense?.id,
+    formCurrency,
+    tripBaseCurrency,
+    useCustomExchangeRate,
+  ]);
 
   const initializeCustomSplits = (participantIds: string[]) => {
     const custom: Record<string, string> = {};
@@ -178,8 +201,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormCustomSplits(custom);
   };
 
-  const resetFormView = () => {
-    setFormStep('basic');
+  const resetFormView = (reason: string) => {
+    setFormStepWithReason('basic', `reset:${reason}`);
     setShowCustomizeSplit(false);
     setShowMoreOptions(false);
     setFormError(null);
@@ -188,14 +211,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const closeForm = () => {
     onSetAddingExpense(false);
     setEditingExpense(null);
-    resetFormView();
+    resetFormView('close-form');
   };
 
   const handleOpenAddForm = () => {
     const activeIds = approvedMembers.map(m => m.id);
     setFormTitle('');
     setFormAmount('');
-    setFormCurrency(tripBaseCurrency);
+    setFormCurrencyWithReason(tripBaseCurrency, 'open-add-form');
     setUseCustomExchangeRate(false);
     setCustomExchangeRateInput('');
     setFormPayer(currentMember.id);
@@ -205,7 +228,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     initializeCustomSplits(activeIds);
     setFormNotes('');
     setEditingExpense(null);
-    resetFormView();
+    resetFormView('open-add-form');
     onSetAddingExpense(true);
   };
 
@@ -232,17 +255,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setEditingExpense(expense);
     setFormTitle(expense.title);
     setFormAmount(expense.amount.toString());
-    setFormCurrency(expense.currency);
+    setFormCurrencyWithReason(expense.currency, 'open-edit-form');
     if (expense.currency === tripBaseCurrency) {
       setUseCustomExchangeRate(false);
       setCustomExchangeRateInput('');
     } else {
-      const currentTripRate = safeExchangeRates.find(rate => (
-        rate.from_currency === expense.currency &&
-        rate.to_currency === tripBaseCurrency &&
-        Number.isFinite(rate.rate) &&
-        rate.rate > 0
-      ));
+      const currentTripRate = getTripExchangeRate(safeExchangeRates, trip?.id, expense.currency, tripBaseCurrency);
       const matchesTripRate = currentTripRate
         ? Math.abs(currentTripRate.rate - expense.exchange_rate_to_base) < 0.000001
         : false;
@@ -255,7 +273,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormParticipants(participantIds);
     setFormSplitMethod(isSplitEqual ? 'equal' : 'custom');
     setFormCustomSplits(custom);
-    setFormStep('basic');
+    setFormStepWithReason('basic', 'open-edit-form');
     setShowCustomizeSplit(!isSplitEqual);
     setShowMoreOptions(expense.currency !== tripBaseCurrency || Boolean(expense.notes));
     setFormError(null);
@@ -284,7 +302,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     return true;
   };
 
-  const handleContinueToPreview = () => {
+  const handleContinueToPreview = (event?: React.MouseEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    submitSourceRef.current = null;
+
     if (!validateBasicFields()) return;
 
     if (formCurrency !== tripBaseCurrency && !hasValidRate) {
@@ -293,13 +315,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
           ? 'Enter a custom exchange rate greater than zero'
           : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
       );
-      setShowMoreOptions(true);
-      setFormStep('preview');
+      setFormStepWithReason('preview', 'continue-missing-rate');
       return;
     }
 
     setFormError(null);
-    setFormStep('preview');
+    setFormStepWithReason('preview', 'continue');
   };
 
   const buildSplitsList = (): { member_id: string; amount_owed: number }[] | null => {
@@ -317,42 +338,29 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       return calculateEqualSplits(convertedAmount, formParticipants);
     }
 
-    const customSplitsToVerify: { member_id: string; amount_owed: number }[] = [];
-    let hasInvalidInput = false;
-
-    formParticipants.forEach(memberId => {
-      const value = parseFloat(formCustomSplits[memberId] || '');
-      if (Number.isNaN(value) || value < 0) {
-        hasInvalidInput = true;
-      }
-
-      customSplitsToVerify.push({
-        member_id: memberId,
-        amount_owed: Math.round((Number.isFinite(value) ? value : 0) * 100) / 100,
-      });
-    });
-
-    if (hasInvalidInput) {
-      setFormError('Fill in custom split amounts for every selected participant');
+    if (!smartCustomSplitResult.isValid) {
+      setFormError(smartCustomSplitResult.error ?? 'Custom split amounts must match the converted expense total.');
       return null;
     }
 
-    if (!validateCustomSplits(convertedAmount, customSplitsToVerify)) {
-      const sum = customSplitsToVerify.reduce((total, item) => total + item.amount_owed, 0);
-      setFormError(
-        `Custom splits total ${sum.toFixed(2)} ${tripBaseCurrency}, but the converted amount is ${hasValidConvertedAmount ? convertedAmount.toFixed(2) : 'not ready'} ${tripBaseCurrency}`
-      );
-      return null;
-    }
-
-    return customSplitsToVerify;
+    return smartCustomSplitResult.splits;
   };
 
   const handleFormSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const submitSource = submitSourceRef.current;
+
+    if (formStep !== 'preview' || submitSource !== 'save-expense') {
+      submitSourceRef.current = null;
+      return;
+    }
+
     if (isSaving) return;
 
-    if (!validateBasicFields()) return;
+    if (!validateBasicFields()) {
+      submitSourceRef.current = null;
+      return;
+    }
 
     const amount = parseFloat(formAmount);
     const exchangeRate = activeExchangeRate;
@@ -362,15 +370,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
           ? 'Exchange rate must be greater than zero'
           : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
       );
-      setShowMoreOptions(true);
-      setFormStep('preview');
+      setFormStepWithReason('preview', 'submit-invalid-rate');
+      submitSourceRef.current = null;
       return;
     }
 
     const splitsList = buildSplitsList();
     if (!splitsList) {
-      setFormStep('preview');
+      setFormStepWithReason('preview', 'submit-invalid-splits');
       setShowCustomizeSplit(true);
+      submitSourceRef.current = null;
       return;
     }
 
@@ -408,6 +417,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       console.error(error);
       setFormError(error instanceof Error ? error.message : 'Could not save this expense');
     } finally {
+      submitSourceRef.current = null;
       setIsSaving(false);
     }
   };
@@ -430,6 +440,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const toggleParticipant = (memberId: string) => {
     setFormParticipants(prev => {
       if (prev.includes(memberId)) {
+        setFormCustomSplits(current => {
+          const next = { ...current };
+          delete next[memberId];
+          return next;
+        });
         return prev.filter(id => id !== memberId);
       }
       return [...prev, memberId];
@@ -442,6 +457,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     ? 'Everyone'
     : `${formParticipants.length} people`;
   const firstEqualSplit = equalPreviewSplits[0]?.amount_owed ?? 0;
+  const customSplitTotal = smartCustomSplitResult.splits.reduce((sum, item) => sum + item.amount_owed, 0);
+  const rateSourceText = isBaseCurrencyExpense
+    ? 'Same as base currency'
+    : useCustomExchangeRate
+      ? activeExchangeRate
+        ? `Using custom rate: 1 ${formCurrency} = ${activeExchangeRate.toString()} ${tripBaseCurrency}`
+        : 'Enter a custom exchange rate'
+      : tripExchangeRate
+        ? `Using trip rate: 1 ${formCurrency} = ${tripExchangeRate.toString()} ${tripBaseCurrency}`
+        : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
 
   return (
     <div className="flex flex-col h-full pb-20 animate-fade-in relative">
@@ -517,7 +542,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     <select
                       value={formCurrency}
                       id="select-expense-currency"
-                      onChange={event => setFormCurrency(event.target.value as Currency)}
+                      onChange={event => setFormCurrencyWithReason(event.target.value as Currency, 'basic-currency-select')}
                       className="w-full min-h-12 bg-[#1a1d23] border border-slate-800 rounded-2xl px-3 py-3 text-sm font-bold text-slate-100 focus:border-indigo-500 focus:outline-none cursor-pointer"
                     >
                       <option value="AED">AED</option>
@@ -593,7 +618,162 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       </p>
                     </div>
                   </div>
+
+                  <div className="mt-3 rounded-2xl bg-[#121418] border border-slate-800 p-3">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
+                      Rate used
+                    </p>
+                    <p className={`text-xs font-semibold mt-1 ${
+                      !isBaseCurrencyExpense && !hasValidRate ? 'text-amber-200' : 'text-slate-100'
+                    }`}>
+                      {rateSourceText}
+                    </p>
+                    {hasValidConvertedAmount ? (
+                      <p className="text-[11px] text-indigo-300 mt-1 font-mono">
+                        {displayAmount.toFixed(2)} {formCurrency} = {convertedAmount.toFixed(2)} {tripBaseCurrency}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Enter a valid amount and rate to preview the converted total.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 rounded-2xl bg-[#121418] border border-slate-800 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
+                          Split preview
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          {formSplitMethod === 'equal' ? 'Equal split' : 'Custom split'} across {participantSummary.toLowerCase()}.
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                        {tripBaseCurrency}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-col gap-2">
+                      {formSplitMethod === 'equal' ? (
+                        equalPreviewSplits.length > 0 ? (
+                          equalPreviewSplits.map(item => {
+                            const member = approvedMembers.find(m => m.id === item.member_id);
+                            return (
+                              <div key={item.member_id} className="flex items-center justify-between text-xs text-slate-400">
+                                <span>{member?.display_name ?? 'Participant'}</span>
+                                <span className="font-mono font-bold text-slate-100">
+                                  {item.amount_owed.toFixed(2)} {tripBaseCurrency}
+                                </span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <p className="text-xs text-slate-500">Enter a valid amount and rate to preview splits.</p>
+                        )
+                      ) : (
+                        formParticipants.map(participantId => {
+                          const member = approvedMembers.find(m => m.id === participantId);
+                          const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
+                          return (
+                            <div key={participantId} className="flex items-center justify-between text-xs text-slate-400">
+                              <span>
+                                {member?.display_name ?? 'Participant'}
+                                <span className="ml-1 text-[9px] uppercase">
+                                  {splitRow?.mode ?? 'auto'}
+                                </span>
+                              </span>
+                              <span className="font-mono font-bold text-slate-100">
+                                {splitRow ? splitRow.amount_owed.toFixed(2) : '--'} {tripBaseCurrency}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
                 </section>
+
+                {formCurrency !== tripBaseCurrency && (
+                  <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4">
+                    {!useCustomExchangeRate && tripExchangeRate && (
+                      <div>
+                        <p className="text-xs text-slate-300">
+                          Using trip rate:
+                        </p>
+                        <p className="font-mono text-sm text-indigo-300 mt-1">
+                          1 {formCurrency} = {tripExchangeRate.toString()} {tripBaseCurrency}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUseCustomExchangeRate(true);
+                            setCustomExchangeRateInput('');
+                          }}
+                          className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
+                        >
+                          Use custom exchange rate
+                        </button>
+                      </div>
+                    )}
+
+                    {!useCustomExchangeRate && !tripExchangeRate && (
+                      <div>
+                        <p className="text-xs text-amber-200 leading-relaxed">
+                          No trip exchange rate set for {formCurrency} -&gt; {tripBaseCurrency}. Ask admin to set it or enter a custom rate.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUseCustomExchangeRate(true);
+                            setCustomExchangeRateInput('');
+                          }}
+                          className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
+                        >
+                          Enter custom rate
+                        </button>
+                      </div>
+                    )}
+
+                    {useCustomExchangeRate && (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-2">
+                          Custom exchange rate
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-slate-400">1 {formCurrency} =</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            id="input-exchange-rate"
+                            value={customExchangeRateInput}
+                            onChange={event => {
+                              const nextValue = event.target.value;
+                              if (isDecimalInputValue(nextValue)) {
+                                setCustomExchangeRateInput(nextValue);
+                              }
+                            }}
+                            placeholder="Required"
+                            className="min-w-0 flex-1 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 font-mono text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
+                          />
+                          <span className="text-xs font-mono text-slate-400">{tripBaseCurrency}</span>
+                        </div>
+                        {tripExchangeRate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUseCustomExchangeRate(false);
+                              setCustomExchangeRateInput('');
+                            }}
+                            className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
+                          >
+                            Use trip rate
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -601,19 +781,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     onClick={() => setShowCustomizeSplit(prev => !prev)}
                     className={`min-h-12 rounded-2xl border px-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer ${
                       showCustomizeSplit
-                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        ? 'bg-indigo-600 border-indigo-500 text-slate-950'
                         : 'bg-[#1a1d23] border-slate-800 text-slate-200'
                     }`}
                   >
                     <Users className="w-4 h-4" />
-                    Customize
+                    Customize Split
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowMoreOptions(prev => !prev)}
                     className={`min-h-12 rounded-2xl border px-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer ${
                       showMoreOptions
-                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        ? 'bg-indigo-600 border-indigo-500 text-slate-950'
                         : 'bg-[#1a1d23] border-slate-800 text-slate-200'
                     }`}
                   >
@@ -628,13 +808,23 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <div>
                         <h3 className="text-sm font-bold text-white">Customize split</h3>
                         <p className="text-[11px] text-slate-500 mt-0.5">
-                          Select people and choose equal or custom amounts.
+                          Split amounts are in {tripBaseCurrency}. Personal display currency is only a preview.
                         </p>
                       </div>
                       <button
                         type="button"
                         id="btn-split-all-match"
-                        onClick={() => setFormParticipants(approvedMembers.map(member => member.id))}
+                        onClick={() => {
+                          const allIds = approvedMembers.map(member => member.id);
+                          setFormParticipants(allIds);
+                          setFormCustomSplits(prev => {
+                            const next: Record<string, string> = {};
+                            allIds.forEach(id => {
+                              next[id] = formParticipants.includes(id) ? prev[id] ?? '' : '';
+                            });
+                            return next;
+                          });
+                        }}
                         className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-2 rounded-xl cursor-pointer"
                       >
                         Select all
@@ -671,9 +861,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <button
                         type="button"
                         id="btn-split-equal"
-                        onClick={() => setFormSplitMethod('equal')}
+                        onClick={() => {
+                          setFormSplitMethod('equal');
+                          initializeCustomSplits(formParticipants);
+                        }}
                         className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                          formSplitMethod === 'equal' ? 'bg-indigo-600 text-white' : 'text-slate-400'
+                          formSplitMethod === 'equal' ? 'bg-indigo-600 text-slate-950' : 'text-slate-400'
                         }`}
                       >
                         Equal
@@ -683,7 +876,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         id="btn-split-custom"
                         onClick={() => setFormSplitMethod('custom')}
                         className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                          formSplitMethod === 'custom' ? 'bg-indigo-600 text-white' : 'text-slate-400'
+                          formSplitMethod === 'custom' ? 'bg-indigo-600 text-slate-950' : 'text-slate-400'
                         }`}
                       >
                         Custom
@@ -706,24 +899,92 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       </div>
                     ) : (
                       <div className="flex flex-col gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              initializeCustomSplits(formParticipants);
+                              setFormSplitMethod('equal');
+                              setFormError(null);
+                            }}
+                            className="text-[10px] font-bold text-slate-200 bg-[#121418] border border-slate-800 px-3 py-2 rounded-xl cursor-pointer"
+                          >
+                            Reset equal split
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              initializeCustomSplits(formParticipants);
+                              setFormError(null);
+                            }}
+                            className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-2 rounded-xl cursor-pointer"
+                          >
+                            Clear manual amounts
+                          </button>
+                        </div>
+                        <div className={`rounded-2xl border px-3 py-2 text-[11px] ${
+                          smartCustomSplitResult.isValid
+                            ? 'bg-[#121418] border-slate-800 text-slate-500'
+                            : 'bg-rose-950/30 border-rose-900/40 text-rose-200'
+                        }`}>
+                          <p>
+                            Remaining to distribute: {smartCustomSplitResult.remainingAmount.toFixed(2)} {tripBaseCurrency}
+                          </p>
+                          {!smartCustomSplitResult.isValid && smartCustomSplitResult.error && (
+                            <p className="mt-1">{smartCustomSplitResult.error}</p>
+                          )}
+                        </div>
                         {formParticipants.map(participantId => {
                           const member = approvedMembers.find(m => m.id === participantId);
+                          const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
+                          const manualValue = formCustomSplits[participantId] ?? '';
+                          const isManual = manualValue.trim() !== '' && splitRow?.mode === 'manual';
+                          const displaySplit = splitRow?.amount_owed ?? 0;
+                          const displaySplitEquivalent = formatDisplayMoney(
+                            displaySplit,
+                            tripBaseCurrency,
+                            displayCurrency,
+                            safeExchangeRates,
+                            trip.id
+                          );
                           return (
                             <label key={participantId} className="flex items-center justify-between gap-3 rounded-2xl bg-[#121418] border border-slate-800 px-3 py-2">
-                              <span className="text-sm font-semibold text-slate-200 truncate">
-                                {member?.display_name ?? 'Participant'}
+                              <span className="min-w-0">
+                                <span className="text-sm font-semibold text-slate-200 truncate block">
+                                  {member?.display_name ?? 'Participant'}
+                                </span>
+                                <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
+                                  isManual ? 'text-indigo-300' : 'text-slate-500'
+                                }`}>
+                                  {isManual ? 'Manual' : 'Auto'}
+                                </span>
+                                {!isManual && (
+                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                    Auto {displaySplit.toFixed(2)} {tripBaseCurrency}
+                                  </span>
+                                )}
+                                {displaySplitEquivalent.converted && (
+                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                    {displaySplitEquivalent.primary}
+                                  </span>
+                                )}
                               </span>
                               <span className="flex items-center gap-2 shrink-0">
                                 <input
-                                  type="number"
-                                  step="0.01"
+                                  type="text"
+                                  inputMode="decimal"
                                   id={`input-custom-split-${participantId}`}
-                                  value={formCustomSplits[participantId] || ''}
-                                  onChange={event => setFormCustomSplits(prev => ({
-                                    ...prev,
-                                    [participantId]: event.target.value,
-                                  }))}
-                                  placeholder="0.00"
+                                  value={manualValue}
+                                  onChange={event => {
+                                    const nextValue = event.target.value;
+                                    if (isMoneyInputValue(nextValue)) {
+                                      setFormCustomSplits(prev => ({
+                                        ...prev,
+                                        [participantId]: nextValue,
+                                      }));
+                                    }
+                                  }}
+                                  placeholder={displaySplit.toFixed(2)}
                                   className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
                                 />
                                 <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
@@ -732,9 +993,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           );
                         })}
                         <div className="flex justify-between border-t border-slate-800 pt-3 text-xs">
-                          <span className="text-slate-500">Custom total</span>
+                          <span className="text-slate-500">Calculated total</span>
                           <span className="font-mono text-slate-200">
-                            {formParticipants.reduce((sum, id) => sum + parseFloat(formCustomSplits[id] || '0'), 0).toFixed(2)}
+                            {customSplitTotal.toFixed(2)}
                             {' / '}
                             {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
                           </span>
@@ -761,96 +1022,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         className="w-full min-h-12 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-100 font-mono focus:border-indigo-500 focus:outline-none"
                       />
                     </div>
-
-                    {formCurrency !== tripBaseCurrency && (
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-2">
-                          Exchange rate
-                        </label>
-                        {!useCustomExchangeRate && tripExchangeRate && (
-                          <div className="rounded-2xl bg-[#121418] border border-slate-800 px-4 py-3">
-                            <p className="text-xs text-slate-300">
-                              Using trip rate:
-                            </p>
-                            <p className="font-mono text-sm text-indigo-300 mt-1">
-                              1 {formCurrency} = {tripExchangeRate.toString()} {tripBaseCurrency}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setUseCustomExchangeRate(true);
-                                setCustomExchangeRateInput('');
-                              }}
-                              className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
-                            >
-                              Use custom exchange rate
-                            </button>
-                          </div>
-                        )}
-
-                        {!useCustomExchangeRate && !tripExchangeRate && (
-                          <div className="rounded-2xl bg-[#121418] border border-slate-800 px-4 py-3">
-                            <p className="text-xs text-slate-400 leading-relaxed">
-                              No trip exchange rate set for {formCurrency} -&gt; {tripBaseCurrency}. Ask admin to set it or enter a custom rate.
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setUseCustomExchangeRate(true);
-                                setCustomExchangeRateInput('');
-                              }}
-                              className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
-                            >
-                              Enter custom rate
-                            </button>
-                          </div>
-                        )}
-
-                        {useCustomExchangeRate && (
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-mono text-slate-400">1 {formCurrency} =</span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                id="input-exchange-rate"
-                                value={customExchangeRateInput}
-                                onChange={event => {
-                                  const nextValue = event.target.value;
-                                  if (isDecimalInputValue(nextValue)) {
-                                    setCustomExchangeRateInput(nextValue);
-                                  }
-                                }}
-                                placeholder="Required"
-                                className="min-w-0 flex-1 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 font-mono text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
-                              />
-                              <span className="text-xs font-mono text-slate-400">{tripBaseCurrency}</span>
-                            </div>
-                            {tripExchangeRate && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setUseCustomExchangeRate(false);
-                                  setCustomExchangeRateInput('');
-                                }}
-                                className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
-                              >
-                                Use trip rate
-                              </button>
-                            )}
-                          </div>
-                        )}
-                        {hasValidConvertedAmount ? (
-                          <p className="text-[11px] text-indigo-300 mt-2 font-mono">
-                            {displayAmount.toFixed(2)} {formCurrency} approx {convertedAmount.toFixed(2)} {tripBaseCurrency}
-                          </p>
-                        ) : (
-                          <p className="text-[11px] text-slate-500 mt-2">
-                            Enter a valid amount and rate to preview the converted total.
-                          </p>
-                        )}
-                      </div>
-                    )}
 
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-2">
@@ -884,7 +1055,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 <button
                   type="button"
                   onClick={handleContinueToPreview}
-                  className="min-h-12 flex-[1.4] rounded-2xl bg-indigo-600 text-white font-bold text-sm cursor-pointer accent-glow"
+                  className="min-h-12 flex-[1.4] rounded-2xl bg-indigo-600 text-slate-950 font-bold text-sm cursor-pointer accent-glow"
                 >
                   Continue
                 </button>
@@ -893,7 +1064,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               <>
                 <button
                   type="button"
-                  onClick={() => setFormStep('basic')}
+                  onClick={() => setFormStepWithReason('basic', 'back')}
                   className="min-h-12 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-300 px-4 font-bold text-sm cursor-pointer flex items-center justify-center"
                   aria-label="Back to basic fields"
                 >
@@ -903,7 +1074,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   type="submit"
                   id="btn-expense-submit"
                   disabled={isSaving}
-                  className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-white font-bold text-sm cursor-pointer accent-glow"
+                  onClick={() => {
+                    submitSourceRef.current = 'save-expense';
+                  }}
+                  className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-slate-950 font-bold text-sm cursor-pointer accent-glow"
                 >
                   {isSaving ? 'Saving...' : editingExpense ? 'Save changes' : 'Save expense'}
                 </button>
@@ -925,9 +1099,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </div>
 
               <button
+                type="button"
                 id="btn-add-expense-tab"
                 onClick={handleOpenAddForm}
-                className="w-12 h-12 bg-indigo-600 hover:bg-[#5334f5] active:scale-95 text-white rounded-full shadow-lg transition-all flex items-center justify-center cursor-pointer accent-glow"
+                className="w-12 h-12 bg-indigo-600 active:scale-95 text-slate-950 rounded-full shadow-lg transition-all flex items-center justify-center cursor-pointer accent-glow"
                 title="Add Expense"
               >
                 <Plus className="w-5 h-5 stroke-[2.5]" />
@@ -962,6 +1137,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               <div className="flex flex-col gap-2 pb-16">
                 {filteredExpenses.map(expense => {
                   const paidBy = approvedMembers.find(m => m.id === expense.paid_by_member_id);
+                  const displayEquivalent = formatDisplayMoney(
+                    expense.converted_amount,
+                    tripBaseCurrency,
+                    displayCurrency,
+                    safeExchangeRates,
+                    trip.id
+                  );
+                  const showDisplayEquivalent = displayEquivalent.converted && displayEquivalent.currency !== expense.currency;
                   return (
                     <button
                       type="button"
@@ -986,6 +1169,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         {expense.currency !== tripBaseCurrency && (
                           <span className="text-[10px] text-slate-500 font-mono block mt-1">
                             {Number.isFinite(expense.converted_amount) ? expense.converted_amount.toFixed(2) : '--'} {tripBaseCurrency}
+                          </span>
+                        )}
+                        {showDisplayEquivalent && (
+                          <span className="text-[10px] text-slate-500 font-mono block mt-1">
+                            {displayEquivalent.primary}
                           </span>
                         )}
                       </span>
@@ -1033,6 +1221,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     <p className="font-mono text-xl font-bold text-slate-100 mt-1">
                       {detailExpense.amount.toFixed(2)} {detailExpense.currency}
                     </p>
+                    {detailExpense.currency === tripBaseCurrency && detailDisplayAmount?.converted && detailDisplayAmount.currency !== detailExpense.currency && (
+                      <p className="text-[10px] text-slate-500 font-mono mt-1">
+                        {detailDisplayAmount.primary}
+                      </p>
+                    )}
+                    {detailExpense.currency === tripBaseCurrency && detailDisplayAmount?.helper && (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        {detailDisplayAmount.helper}
+                      </p>
+                    )}
                   </div>
                   {detailExpense.currency !== tripBaseCurrency && (
                     <div className="text-right">
@@ -1045,6 +1243,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <p className="text-[10px] text-slate-500 font-mono mt-1">
                         Rate {Number.isFinite(detailExpense.exchange_rate_to_base) ? detailExpense.exchange_rate_to_base.toFixed(4) : '--'}
                       </p>
+                      {detailDisplayAmount?.converted && detailDisplayAmount.currency !== detailExpense.currency && (
+                        <p className="text-[10px] text-slate-500 font-mono mt-1">
+                          {detailDisplayAmount.primary}
+                        </p>
+                      )}
+                      {detailDisplayAmount?.helper && (
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {detailDisplayAmount.helper}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1111,7 +1319,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     type="button"
                     id="btn-delete-confirm-open"
                     onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center justify-center gap-2 bg-rose-950/40 border border-rose-800/45 text-rose-200 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
+                    className="flex items-center justify-center gap-2 bg-[var(--color-negative)] text-slate-950 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
                   >
                     <Trash2 className="w-4 h-4" />
                     Delete
@@ -1153,7 +1361,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 id="btn-delete-expense-submit"
                 onClick={handleDelete}
                 disabled={isSaving}
-                className="bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
+                className="bg-[var(--color-negative)] disabled:opacity-60 text-slate-950 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
               >
                 {isSaving ? 'Deleting...' : 'Delete'}
               </button>

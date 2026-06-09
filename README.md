@@ -1,6 +1,6 @@
 # Parité
 
-Parité is a mobile-first Vite React app for private trip membership and shared expense splitting. Phase 4 uses Supabase Auth email/password accounts, Supabase trips/members, invite codes, admin approval, shared Supabase expenses, and manual trip exchange-rate defaults.
+Parité is a mobile-first Vite React app for private trip membership and shared expense splitting. Phase 4.5 uses Supabase Auth email/password accounts, Supabase trips/members, invite codes, admin approval, shared Supabase expenses, manual trip exchange-rate defaults, and per-member display currency preferences.
 
 Settlements are still local-only for now. Expenses, expense splits, and exchange-rate defaults are saved in Supabase.
 
@@ -29,7 +29,7 @@ Do not paste a filename like `supabase/migrations/202606090001_phase1_contract_r
 1. In Mac Terminal, go to this project folder:
 
 ```bash
-cd /Users/nurtore.arynuruly/Projects/Parité
+cd /Users/nurtore.arynuruly/Projects/SaiHat
 ```
 
 2. Copy the full migration SQL into your Mac clipboard.
@@ -62,7 +62,7 @@ create extension if not exists pgcrypto;
 
 10. Click **Run**.
 
-This migration is idempotent and is safe to run after a partial or older setup. Do not patch one RPC at a time.
+This full migration is intended for a fresh project or a full repair pass. If your existing Supabase project is already working and you only need Phase 4.5 display currency, use the incremental patch below instead.
 
 After running the migration, reload the Supabase API schema cache with a new SQL query:
 
@@ -88,6 +88,7 @@ and proname in (
   'reject_member',
   'remove_member',
   'update_exchange_rate',
+  'update_member_display_currency',
   'create_expense_with_splits',
   'update_expense_with_splits',
   'delete_expense'
@@ -107,6 +108,19 @@ Use the anon key only. Never put the service role key in the browser app.
 13. In Supabase, open **Authentication -> Providers -> Email**.
 
 For easiest local testing, turn off email confirmations. If confirmations stay on, signup may show a check-email message before the account can log in.
+
+## Phase 4.5 Incremental SQL Patch
+
+If your current Supabase database already has trips, members, expenses, splits, and exchange rates working, run only this patch for Phase 4.5.
+
+In Mac Terminal:
+
+```bash
+cd /Users/nurtore.arynuruly/Projects/SaiHat
+pbcopy < supabase/migrations/202606090002_phase45_display_currency.sql
+```
+
+Then paste into Supabase **SQL Editor -> New query** with `Command + V` and click **Run**. This patch adds `members.display_currency`, creates `update_member_display_currency(member_id_input, display_currency_input)`, grants it to authenticated users, and reloads the API schema cache.
 
 ## Run Locally On Mac
 
@@ -208,15 +222,33 @@ Use a different display name, or ask the admin to remove the previous member ent
 - Edit and delete an expense as the creator or admin, then refresh another browser and confirm the change appears.
 - Confirm pending, rejected, and removed users cannot access the expense UI or exchange-rate settings.
 
+## Phase 4.5 Manual Test Checklist
+
+- Run the incremental Phase 4.5 SQL patch above, or rerun the full repair migration on a fresh project.
+- Confirm old member rows still work with `display_currency` as `null`.
+- Create trips with base currencies `AED`, `CNY`, and `KZT`; confirm the selected base currency is saved.
+- In a `CNY` trip, set default rates `AED -> CNY = 1.8` and `KZT -> CNY = 0.013`.
+- Open the drawer and set your display currency to `AED`.
+- Confirm `180 CNY` displays as approximately `100 AED` with `180 CNY base`.
+- Change your display currency to `KZT`.
+- Confirm `13 CNY` displays as approximately `1000 KZT`.
+- Change display currency back to **Same as trip base currency** and confirm amounts show in `CNY`.
+- Refresh or log out/in and confirm your display currency preference persists.
+- With two accounts in the same trip, set User A to `AED` and User B to `CNY`; confirm each user sees amounts in their own display currency.
+- Remove the needed display-rate row or use a missing pair and confirm the app shows base currency plus “Display rate unavailable. Showing CNY.”
+- Add an expense and confirm changing display currency does not change stored expense converted amounts or splits.
+- Confirm the page background, primary actions, and destructive actions use the requested palette.
+
 ## Phase 4 Notes
 
 - Supabase Auth `auth.users.id` is the stable account identity.
 - `members.user_id` links a trip member row to an account.
 - `members.display_name` is only a trip nickname.
 - Old access tokens are kept only for legacy claiming and are no longer primary identity.
-- Trips, members, expenses, expense splits, and exchange-rate defaults are persisted in Supabase.
+- Trips, members, expenses, expense splits, exchange-rate defaults, and member display-currency preferences are persisted in Supabase.
 - Direct table reads/writes are not used by the frontend.
 - Exchange rates are manual only. No automatic exchange-rate API is used.
 - Admin-entered non-base expense rates update the trip default; non-admin expense rates apply only to that expense.
+- `members.display_currency` is a per-trip membership preference. It does not change trip base currency or stored accounting values.
 - Settlements are local-only and are not saved to Supabase yet.
 - Payment flows and receipt scanning are not implemented yet.

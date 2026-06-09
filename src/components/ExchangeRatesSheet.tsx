@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Save, X } from 'lucide-react';
 import { Currency, ExchangeRate, Member, Trip } from '../types';
 import { isDecimalInputValue, parsePositiveDecimal } from '../lib/decimalInput';
+import { getTripExchangeRate } from '../lib/exchangeRates';
 
 const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT'];
 
@@ -41,17 +42,14 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
 
     const nextInputs: Record<string, string> = {};
     pairs.forEach(fromCurrency => {
-      const rate = safeExchangeRates.find(item => (
-        item.from_currency === fromCurrency &&
-        item.to_currency === tripBaseCurrency
-      ));
+      const rate = getTripExchangeRate(safeExchangeRates, trip?.id, fromCurrency, tripBaseCurrency);
       nextInputs[fromCurrency] = rate ? rate.rate.toString() : '';
     });
 
     setRateInputs(nextInputs);
     setError(null);
     setSavingPair(null);
-  }, [isOpen, pairs, safeExchangeRates, tripBaseCurrency]);
+  }, [isOpen, pairs, safeExchangeRates, trip?.id, tripBaseCurrency]);
 
   if (!isOpen) return null;
 
@@ -109,7 +107,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
 
         <div className="px-4 py-4 flex flex-col gap-3">
           {error && (
-            <div className="rounded-2xl border border-rose-900/50 bg-rose-950/35 px-3 py-2 text-xs text-rose-200">
+            <div className="rounded-2xl border border-[var(--color-negative)]/40 bg-[var(--color-negative)]/15 px-3 py-2 text-xs text-rose-100">
               {error}
             </div>
           )}
@@ -142,7 +140,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
                       type="button"
                       onClick={() => handleSave(fromCurrency)}
                       disabled={savingPair === fromCurrency}
-                      className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center cursor-pointer disabled:opacity-60"
+                      className="w-11 h-11 rounded-2xl bg-indigo-600 text-slate-950 flex items-center justify-center cursor-pointer disabled:opacity-60"
                       aria-label={`Save ${fromCurrency} rate`}
                     >
                       <Save className="w-4 h-4" />
