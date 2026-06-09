@@ -29,6 +29,7 @@ import {
   requestJoinByInvite,
   updateExchangeRate,
   updateExpenseWithSplits,
+  updateMemberDisplayCurrency,
 } from './lib/tripRepository';
 import {
   AlertOctagon,
@@ -88,10 +89,14 @@ export default function App() {
     const nextTripId = activeTrip?.id ?? null;
     if (nextTripId === localSettlementTripId) return;
 
+    const previousTripId = localSettlementTripId;
     setLocalSettlementTripId(nextTripId);
     setLocalSettlements([]);
-    setSelectedExpenseIdForDetail(null);
-    setIsAddingExpense(false);
+
+    if (previousTripId !== null && nextTripId !== previousTripId) {
+      setSelectedExpenseIdForDetail(null);
+      setIsAddingExpense(false);
+    }
   }, [activeTrip?.id, localSettlementTripId]);
 
   const clearAccessToken = () => {
@@ -382,6 +387,16 @@ export default function App() {
     setActionError(null);
   };
 
+  const handleUpdateDisplayCurrency = async (displayCurrency: Currency | null) => {
+    if (!currentMember) {
+      throw new Error('Trip member is not loaded.');
+    }
+
+    const nextWorkspace = await updateMemberDisplayCurrency(currentMember.id, displayCurrency);
+    applyWorkspace(nextWorkspace);
+    setActionError(null);
+  };
+
   const rememberAdminExchangeRate = async (
     currency: Currency,
     exchangeRate: number
@@ -574,7 +589,7 @@ export default function App() {
               setAuthMessage(null);
             }}
             className={`min-h-10 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'
+              authMode === 'login' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             Login
@@ -587,7 +602,7 @@ export default function App() {
               setAuthMessage(null);
             }}
             className={`min-h-10 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              authMode === 'signup' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'
+              authMode === 'signup' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             Sign up
@@ -640,7 +655,7 @@ export default function App() {
         <button
           type="submit"
           disabled={isAuthSubmitting}
-          className="w-full bg-indigo-600 hover:bg-[#5334f5] disabled:opacity-60 text-white font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 cursor-pointer"
+          className="w-full bg-indigo-600 disabled:opacity-60 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 cursor-pointer"
         >
           {isAuthSubmitting ? 'Please wait...' : authMode === 'signup' ? 'Create Account' : 'Log In'}
         </button>
@@ -664,9 +679,9 @@ export default function App() {
   ) : null;
 
   return (
-    <div className="min-h-screen bg-[#090b0e] flex flex-col md:py-6 items-center select-none font-sans">
-      <div className="w-full max-w-md bg-[#121418] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden min-h-screen md:min-h-[840px] flex flex-col relative">
-        <div className="bg-[#090b0e] text-slate-400 text-[10px] font-mono px-6 py-1.5 shrink-0 flex justify-between select-none items-center border-b border-slate-900/45">
+    <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:py-6 items-center select-none font-sans overflow-hidden">
+      <div className="tripbalance-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
+        <div className="bg-[var(--color-background)] text-slate-700 text-[10px] font-mono px-6 py-1.5 shrink-0 flex justify-between select-none items-center border-b border-slate-300/70">
           <span>17:10 pm</span>
           <div className="w-24 h-4 bg-[#050607] rounded-full border border-slate-905 mx-auto hidden md:block" />
           <div className="flex gap-1.5 items-center">
@@ -693,6 +708,7 @@ export default function App() {
               onLeaveTrip={handleLeaveTrip}
               onAdminTools={() => setActiveTab('members')}
               onExchangeRates={() => setIsExchangeRatesOpen(true)}
+              onUpdateDisplayCurrency={handleUpdateDisplayCurrency}
               onLogout={handleLogout}
             />
             {currentMember?.status === 'approved' && (
@@ -708,8 +724,8 @@ export default function App() {
           </>
         )}
 
-        <div className={`flex-1 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
-            isApprovedWorkspace ? 'mb-16' : ''
+        <div className={`flex-1 min-h-0 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
+            isApprovedWorkspace ? 'mb-[calc(68px+env(safe-area-inset-bottom))]' : ''
         }`}>
           {!isSupabaseConfigured && renderCenteredMessage(
             'Supabase is not configured',
@@ -793,7 +809,7 @@ export default function App() {
                 <button
                   type="submit"
                   id="btn-join-submit"
-                  className="w-full bg-indigo-600 hover:bg-[#5334f5] text-white font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full bg-indigo-600 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>Request Trip Access</span>
@@ -890,12 +906,15 @@ export default function App() {
                     <option value="AED">AED (Emirati Dirham)</option>
                     <option value="KZT">KZT (Kazakhstani Tenge)</option>
                   </select>
+                  <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                    Trip base currency is used for calculations. You can still view your personal amounts in another currency later.
+                  </p>
                 </div>
 
                 <button
                   type="submit"
                   id="btn-create-trip-submit"
-                  className="w-full bg-indigo-600 hover:bg-[#5334f5] text-white font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-2 text-center cursor-pointer"
+                  className="w-full bg-indigo-600 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-2 text-center cursor-pointer"
                 >
                   Create Trip
                 </button>
@@ -1010,6 +1029,7 @@ export default function App() {
                     currentMember={currentMember}
                     expenses={tripExpenses}
                     splits={tripSplits}
+                    exchangeRates={tripExchangeRates}
                     members={tripMembers}
                     onCreateExpense={handleCreateExpense}
                     onUpdateExpense={handleUpdateExpense}
@@ -1027,6 +1047,7 @@ export default function App() {
                     currentMember={currentMember}
                     expenses={tripExpenses}
                     splits={tripSplits}
+                    exchangeRates={tripExchangeRates}
                     members={tripMembers}
                     settlements={localSettlements}
                     onMarkSettlementPaid={handleMarkSettlementPaid}

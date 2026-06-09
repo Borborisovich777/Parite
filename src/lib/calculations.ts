@@ -32,6 +32,187 @@ export function calculateEqualSplits(
   });
 }
 
+export interface SmartCustomSplitRow {
+  member_id: string;
+  amount_owed: number;
+  amount_cents: number;
+  mode: 'manual' | 'auto';
+}
+
+export interface SmartCustomSplitResult {
+  splits: { member_id: string; amount_owed: number }[];
+  rows: SmartCustomSplitRow[];
+  lockedTotal: number;
+  remainingAmount: number;
+  autoParticipantCount: number;
+  isValid: boolean;
+  error?: string;
+}
+
+const MONEY_INPUT_PATTERN = /^(?:\d+|\d+\.\d{0,2}|\.\d{1,2})$/;
+
+function parseManualAmountToCents(value: string): { kind: 'auto' } | { kind: 'manual'; cents: number } | { kind: 'invalid' } {
+  const trimmed = value.trim();
+  if (trimmed === '') return { kind: 'auto' };
+  if (!MONEY_INPUT_PATTERN.test(trimmed)) return { kind: 'invalid' };
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) return { kind: 'invalid' };
+
+  return { kind: 'manual', cents: Math.round(parsed * 100) };
+}
+
+/**
+ * Calculates custom splits in integer cents. Manual rows are locked and
+ * the remaining cents are distributed across auto rows in participant order.
+ */
+export function calculateSmartCustomSplits({
+  totalAmount,
+  participantIds,
+  manualAmounts,
+}: {
+  totalAmount: number;
+  participantIds: string[];
+  manualAmounts: Record<string, string>;
+}): SmartCustomSplitResult {
+  const totalCents = Number.isFinite(totalAmount) ? Math.round(totalAmount * 100) : 0;
+
+  if (totalCents <= 0) {
+    return {
+      splits: [],
+      rows: [],
+      lockedTotal: 0,
+      remainingAmount: 0,
+      autoParticipantCount: 0,
+      isValid: false,
+      error: 'Enter a valid converted amount before customizing the split.',
+    };
+  }
+
+  if (participantIds.length === 0) {
+    return {
+      splits: [],
+      rows: [],
+      lockedTotal: 0,
+      remainingAmount: totalCents / 100,
+      autoParticipantCount: 0,
+      isValid: false,
+      error: 'At least one participant must be selected.',
+    };
+  }
+
+  const manualCentsById: Record<string, number> = {};
+  let lockedTotalCents = 0;
+
+  for (const participantId of participantIds) {
+    const parsed = parseManualAmountToCents(manualAmounts[participantId] ?? '');
+    if (parsed.kind === 'invalid') {
+      return {
+        splits: [],
+        rows: participantIds.map(id => ({
+          member_id: id,
+          amount_owed: 0,
+          amount_cents: 0,
+          mode: (manualAmounts[id] ?? '').trim() === '' ? 'auto' : 'manual',
+        })),
+        lockedTotal: lockedTotalCents / 100,
+        remainingAmount: (totalCents - lockedTotalCents) / 100,
+        autoParticipantCount: participantIds.filter(id => (manualAmounts[id] ?? '').trim() === '').length,
+        isValid: false,
+        error: 'Custom split amounts must be zero or positive numbers with up to two decimals.',
+      };
+    }
+
+    if (parsed.kind === 'manual') {
+      manualCentsById[participantId] = parsed.cents;
+      lockedTotalCents += parsed.cents;
+    }
+  }
+
+  const autoParticipantIds = participantIds.filter(id => manualCentsById[id] === undefined);
+  const autoParticipantCount = autoParticipantIds.length;
+  const remainingCents = totalCents - lockedTotalCents;
+
+  if (remainingCents < 0) {
+    const rows = participantIds.map(id => ({
+      member_id: id,
+      amount_cents: manualCentsById[id] ?? 0,
+      amount_owed: (manualCentsById[id] ?? 0) / 100,
+      mode: manualCentsById[id] === undefined ? 'auto' as const : 'manual' as const,
+    }));
+
+    return {
+      splits: rows.map(({ member_id, amount_owed }) => ({ member_id, amount_owed })),
+      rows,
+      lockedTotal: lockedTotalCents / 100,
+      remainingAmount: remainingCents / 100,
+      autoParticipantCount,
+      isValid: false,
+      error: 'Manual split amounts are higher than the converted expense total.',
+    };
+  }
+
+  const autoCentsById: Record<string, number> = {};
+  if (autoParticipantCount > 0) {
+    const baseCents = Math.floor(remainingCents / autoParticipantCount);
+    const remainderCents = remainingCents - (baseCents * autoParticipantCount);
+
+    autoParticipantIds.forEach((id, index) => {
+      autoCentsById[id] = baseCents + (index === autoParticipantCount - 1 ? remainderCents : 0);
+    });
+  } else if (remainingCents !== 0) {
+    const rows = participantIds.map(id => ({
+      member_id: id,
+      amount_cents: manualCentsById[id],
+      amount_owed: manualCentsById[id] / 100,
+      mode: 'manual' as const,
+    }));
+
+    return {
+      splits: rows.map(({ member_id, amount_owed }) => ({ member_id, amount_owed })),
+      rows,
+      lockedTotal: lockedTotalCents / 100,
+      remainingAmount: remainingCents / 100,
+      autoParticipantCount: 0,
+      isValid: false,
+      error: 'Manual split amounts must add up exactly to the converted expense total.',
+    };
+  }
+
+  const rows = participantIds.map(id => {
+    const isManual = manualCentsById[id] !== undefined;
+    const amountCents = isManual ? manualCentsById[id] : autoCentsById[id] ?? 0;
+    return {
+      member_id: id,
+      amount_cents: amountCents,
+      amount_owed: amountCents / 100,
+      mode: isManual ? 'manual' as const : 'auto' as const,
+    };
+  });
+
+  const finalCents = rows.reduce((sum, row) => sum + row.amount_cents, 0);
+  if (finalCents !== totalCents) {
+    return {
+      splits: rows.map(({ member_id, amount_owed }) => ({ member_id, amount_owed })),
+      rows,
+      lockedTotal: lockedTotalCents / 100,
+      remainingAmount: remainingCents / 100,
+      autoParticipantCount,
+      isValid: false,
+      error: 'Custom split rounding did not match the converted expense total.',
+    };
+  }
+
+  return {
+    splits: rows.map(({ member_id, amount_owed }) => ({ member_id, amount_owed })),
+    rows,
+    lockedTotal: lockedTotalCents / 100,
+    remainingAmount: remainingCents / 100,
+    autoParticipantCount,
+    isValid: true,
+  };
+}
+
 /**
  * Validates if the sum of custom splits elements equals the converted amount.
  * Allows a tolerance of 0.01.

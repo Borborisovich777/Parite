@@ -116,7 +116,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
           <button
             id="btn-copy-link"
             onClick={handleCopyLink}
-            className="h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-all active:scale-95 cursor-pointer"
+            className="h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-slate-950 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
             title="Copy join link"
           >
             <Share2 className="w-4 h-4" />
@@ -137,7 +137,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
             onClick={() => setActiveCategory('approved')}
             className={`min-h-10 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer ${
               activeCategory === 'approved'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-slate-950'
                 : 'text-slate-500 hover:text-slate-300'
             }`}
           >
@@ -150,13 +150,13 @@ export const MembersTab: React.FC<MembersTabProps> = ({
             onClick={() => setActiveCategory('requests')}
             className={`min-h-10 rounded-xl text-[10px] font-bold uppercase transition-all relative cursor-pointer ${
               activeCategory === 'requests'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-slate-950'
                 : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             Requests
             {pendingRequests.length > 0 && (
-              <span className="absolute top-1 right-1 bg-rose-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center">
+              <span className="absolute top-1 right-1 bg-rose-500 text-slate-950 text-[8px] w-4 h-4 rounded-full flex items-center justify-center">
                 {pendingRequests.length}
               </span>
             )}
@@ -167,7 +167,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
             onClick={() => setActiveCategory('removed')}
             className={`min-h-10 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer ${
               activeCategory === 'removed'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-slate-950'
                 : 'text-slate-500 hover:text-slate-300'
             }`}
           >
@@ -211,7 +211,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                       }
                     }}
                     disabled={busyMemberId === member.id}
-                    className="text-rose-300 bg-rose-950/35 hover:bg-rose-950/55 border border-rose-900/40 p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
+                    className="text-slate-950 bg-[var(--color-negative)] p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
                     title="Remove member"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -253,7 +253,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                     id={`btn-reject-request-${request.id}`}
                     onClick={() => runMemberAction(request.id, () => onRejectMember(request.id))}
                     disabled={busyMemberId === request.id}
-                    className="bg-rose-950/35 border border-rose-900/40 text-rose-200 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
+                    className="bg-[var(--color-negative)] text-slate-950 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserX className="w-3.5 h-3.5" />
                     <span>Reject</span>
@@ -263,7 +263,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                     id={`btn-approve-request-${request.id}`}
                     onClick={() => runMemberAction(request.id, () => onApproveMember(request.id))}
                     disabled={busyMemberId === request.id}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
+                    className="bg-[var(--color-positive)] text-slate-950 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserCheck className="w-3.5 h-3.5" />
                     <span>Approve</span>

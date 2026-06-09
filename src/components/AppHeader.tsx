@@ -18,7 +18,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     : currentMember?.status ?? trip.base_currency;
 
   return (
-    <header className="shrink-0 bg-[#121418]/95 border-b border-slate-800/70 px-4 py-3 flex items-center justify-between gap-3">
+    <header className="app-header-safe sticky top-0 z-40 shrink-0 bg-[#121418]/95 backdrop-blur border-b border-slate-800/70 px-4 pb-3 flex items-center justify-between gap-3">
       <button
         type="button"
         id="btn-open-side-menu"

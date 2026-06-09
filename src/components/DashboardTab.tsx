@@ -1,6 +1,7 @@
 import React from 'react';
-import { Trip, Member, Expense, ExpenseSplit } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, ExchangeRate } from '../types';
 import { calculateMemberBalances } from '../lib/calculations';
+import { formatDisplayMoney, getMemberDisplayCurrency } from '../lib/exchangeRates';
 import { ArrowRight, Plus, Receipt, Wallet } from 'lucide-react';
 
 interface DashboardTabProps {
@@ -8,6 +9,7 @@ interface DashboardTabProps {
   currentMember: Member;
   expenses: Expense[];
   splits: ExpenseSplit[];
+  exchangeRates?: ExchangeRate[];
   members: Member[];
   onAddExpenseClick: () => void;
   onViewExpense: (expenseId: string) => void;
@@ -19,6 +21,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   currentMember,
   expenses,
   splits,
+  exchangeRates = [],
   members,
   onAddExpenseClick,
   onViewExpense,
@@ -32,8 +35,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     .sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime())
     .slice(0, 4);
 
-  const formatAmount = (amount: number) =>
-    `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${trip.base_currency}`;
+  const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
+  const userBalanceDisplay = formatDisplayMoney(
+    currentUserBalance?.net_balance ?? 0,
+    trip.base_currency,
+    displayCurrency,
+    exchangeRates,
+    trip.id
+  );
+  const totalSpendingDisplay = formatDisplayMoney(
+    totalSpending,
+    trip.base_currency,
+    displayCurrency,
+    exchangeRates,
+    trip.id
+  );
 
   const balanceLabel = !currentUserBalance || Math.abs(currentUserBalance.net_balance) <= 0.01
     ? 'Settled up'
@@ -44,9 +60,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   return (
     <div className="flex flex-col gap-5 pb-24 animate-fade-in px-4 pt-4">
       <button
+        type="button"
         id="btn-add-expense-quick"
         onClick={onAddExpenseClick}
-        className="w-full bg-indigo-600 hover:bg-indigo-550 active:scale-[0.98] text-white py-4 px-4 rounded-2xl font-bold shadow-lg transition-all text-sm flex items-center justify-center gap-2 cursor-pointer accent-glow"
+        className="w-full bg-[var(--color-positive)] active:scale-[0.98] text-slate-950 py-4 px-4 rounded-2xl font-bold shadow-lg transition-all text-sm flex items-center justify-center gap-2 cursor-pointer accent-glow"
       >
         <Plus className="w-5 h-5 stroke-[2.5]" />
         <span>Add expense</span>
@@ -75,8 +92,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             }`}
           >
             {currentUserBalance && currentUserBalance.net_balance > 0 ? '+' : ''}
-            {formatAmount(currentUserBalance?.net_balance ?? 0)}
+            {userBalanceDisplay.primary}
           </p>
+          {userBalanceDisplay.secondary && (
+            <p className="text-[10px] text-slate-500 mt-1 font-mono">{userBalanceDisplay.secondary}</p>
+          )}
+          {userBalanceDisplay.helper && (
+            <p className="text-[10px] text-slate-500 mt-1">{userBalanceDisplay.helper}</p>
+          )}
           <p className="text-[11px] text-slate-500 mt-2">{balanceLabel}</p>
         </button>
 
@@ -88,8 +111,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <span>Total spent</span>
           </div>
           <p className="text-xl font-bold font-display text-white leading-none">
-            {formatAmount(totalSpending)}
+            {totalSpendingDisplay.primary}
           </p>
+          {totalSpendingDisplay.secondary && (
+            <p className="text-[10px] text-slate-500 mt-1 font-mono">{totalSpendingDisplay.secondary}</p>
+          )}
+          {totalSpendingDisplay.helper && (
+            <p className="text-[10px] text-slate-500 mt-1">{totalSpendingDisplay.helper}</p>
+          )}
           <p className="text-[11px] text-slate-500 mt-2">{expenses.length} expenses</p>
         </div>
       </div>
@@ -119,6 +148,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           <div className="flex flex-col gap-2">
             {recentExpenses.map(expense => {
               const paidBy = approvedMembers.find(m => m.id === expense.paid_by_member_id);
+              const displayEquivalent = formatDisplayMoney(
+                expense.converted_amount,
+                trip.base_currency,
+                displayCurrency,
+                exchangeRates,
+                trip.id
+              );
+              const showDisplayEquivalent = displayEquivalent.converted && displayEquivalent.currency !== expense.currency;
               return (
                 <button
                   type="button"
@@ -142,6 +179,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                     {expense.currency !== trip.base_currency && (
                       <span className="text-[10px] text-slate-500 font-mono block mt-1">
                         {expense.converted_amount.toFixed(2)} {trip.base_currency}
+                      </span>
+                    )}
+                    {showDisplayEquivalent && (
+                      <span className="text-[10px] text-slate-500 font-mono block mt-1">
+                        {displayEquivalent.primary}
                       </span>
                     )}
                   </span>
