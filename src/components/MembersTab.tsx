@@ -33,13 +33,36 @@ export const MembersTab: React.FC<MembersTabProps> = ({
     window.setTimeout(() => setCopied(false), 2000);
   };
 
+  const copyText = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      showCopied();
+      return;
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+      document.execCommand('copy');
+      showCopied();
+    } finally {
+      document.body.removeChild(textArea);
+    }
+  };
+
   const handleCopyInvite = () => {
-    navigator.clipboard.writeText(trip.invite_code).then(showCopied);
+    copyText(trip.invite_code).catch(error => console.error(error));
   };
 
   const handleCopyLink = () => {
     const joinLink = `${window.location.origin}${window.location.pathname}?invite=${trip.invite_code}`;
-    navigator.clipboard.writeText(joinLink).then(showCopied);
+    copyText(joinLink).catch(error => console.error(error));
   };
 
   const runMemberAction = async (memberId: string, action: () => void | Promise<void>) => {

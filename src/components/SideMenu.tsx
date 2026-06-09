@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import {
   ArrowLeft,
   Copy,
+  LogOut,
+  Settings,
   ShieldCheck,
   Users,
   X,
@@ -12,18 +14,24 @@ interface SideMenuProps {
   isOpen: boolean;
   trip: Trip;
   currentMember: Member | null;
+  accountEmail: string | null;
   onClose: () => void;
   onLeaveTrip: () => void;
   onAdminTools: () => void;
+  onExchangeRates: () => void;
+  onLogout: () => void | Promise<void>;
 }
 
 export const SideMenu: React.FC<SideMenuProps> = ({
   isOpen,
   trip,
   currentMember,
+  accountEmail,
   onClose,
   onLeaveTrip,
   onAdminTools,
+  onExchangeRates,
+  onLogout,
 }) => {
   const isAdmin = currentMember?.role === 'admin';
 
@@ -40,8 +48,29 @@ export const SideMenu: React.FC<SideMenuProps> = ({
 
   if (!isOpen) return null;
 
+  const copyText = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+      document.execCommand('copy');
+    } finally {
+      document.body.removeChild(textArea);
+    }
+  };
+
   const handleCopyInvite = () => {
-    navigator.clipboard?.writeText(trip.invite_code);
+    copyText(trip.invite_code).catch(error => console.error(error));
   };
 
   return (
@@ -99,6 +128,11 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     </span>
                   )}
                 </div>
+                {accountEmail && (
+                  <p className="text-[10px] text-slate-500 mt-1 truncate">
+                    {accountEmail}
+                  </p>
+                )}
               </div>
             </div>
           </section>
@@ -124,18 +158,33 @@ export const SideMenu: React.FC<SideMenuProps> = ({
 
           <section className="flex flex-col gap-2">
             {isAdmin && currentMember?.status === 'approved' && (
-              <button
-                type="button"
-                id="btn-menu-admin-tools"
-                onClick={() => {
-                  onAdminTools();
-                  onClose();
-                }}
-                className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
-              >
-                <Users className="w-4 h-4 text-indigo-300" />
-                Admin tools
-              </button>
+              <>
+                <button
+                  type="button"
+                  id="btn-menu-admin-tools"
+                  onClick={() => {
+                    onAdminTools();
+                    onClose();
+                  }}
+                  className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+                >
+                  <Users className="w-4 h-4 text-indigo-300" />
+                  Admin tools
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-menu-exchange-rates"
+                  onClick={() => {
+                    onExchangeRates();
+                    onClose();
+                  }}
+                  className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+                >
+                  <Settings className="w-4 h-4 text-indigo-300" />
+                  Exchange rates
+                </button>
+              </>
             )}
 
             <button
@@ -148,7 +197,20 @@ export const SideMenu: React.FC<SideMenuProps> = ({
               className="w-full min-h-11 rounded-2xl bg-rose-950/35 border border-rose-900/40 text-rose-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:bg-rose-950/55"
             >
               <ArrowLeft className="w-4 h-4" />
-              Leave trip
+              Exit workspace
+            </button>
+
+            <button
+              type="button"
+              id="btn-app-logout"
+              onClick={() => {
+                onLogout();
+                onClose();
+              }}
+              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+            >
+              <LogOut className="w-4 h-4 text-indigo-300" />
+              Log out
             </button>
           </section>
         </div>
