@@ -32,6 +32,8 @@ export const DUPLICATE_DISPLAY_NAME_MESSAGE =
   'Display name already used in this trip. Use another name or ask the admin to remove or reapprove the previous member.';
 
 export const INVALID_MEMBER_SESSION_MESSAGE = 'Member session not found';
+export const SETTLEMENT_EXPENSE_GUARD_MESSAGE =
+  'This expense was created before a paid settlement. Void the related settlement before changing it.';
 
 function mapTrip(row: Row): Trip {
   return {
@@ -82,6 +84,9 @@ function mapExpense(row: Row): Expense {
     created_by_member_id: row.created_by_member_id,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    deleted_at: row.deleted_at ?? undefined,
+    deleted_by_member_id: row.deleted_by_member_id ?? undefined,
+    delete_reason: row.delete_reason ?? undefined,
   };
 }
 
@@ -119,6 +124,9 @@ function mapSettlement(row: Row): Settlement {
     paid_confirmed_by_member_id: row.paid_confirmed_by_member_id ?? undefined,
     created_at: row.created_at,
     paid_at: row.paid_at ?? undefined,
+    voided_at: row.voided_at ?? undefined,
+    voided_by_member_id: row.voided_by_member_id ?? undefined,
+    void_reason: row.void_reason ?? undefined,
   };
 }
 
@@ -147,12 +155,19 @@ function unwrapJsonObject(data: unknown, rpcName: string): Row {
 }
 
 function mapWorkspace(row: Row): PhaseOneWorkspace {
+  const expenses = Array.isArray(row.expenses)
+    ? row.expenses.map(mapExpense).filter(expense => !expense.deleted_at)
+    : [];
+  const activeExpenseIds = new Set(expenses.map(expense => expense.id));
+
   const workspace = {
     trip: mapNullableTrip(row.trip),
     currentMember: row.member ? mapMember(row.member) : null,
     members: Array.isArray(row.members) ? row.members.map(mapMember) : [],
-    expenses: Array.isArray(row.expenses) ? row.expenses.map(mapExpense) : [],
-    splits: Array.isArray(row.splits) ? row.splits.map(mapExpenseSplit) : [],
+    expenses,
+    splits: Array.isArray(row.splits)
+      ? row.splits.map(mapExpenseSplit).filter(split => activeExpenseIds.has(split.expense_id))
+      : [],
     settlements: Array.isArray(row.settlements) ? row.settlements.map(mapSettlement) : [],
     exchangeRates: Array.isArray(row.exchangeRates) ? row.exchangeRates.map(mapExchangeRate) : [],
   };
@@ -181,6 +196,13 @@ function throwSupabaseError(error: unknown): never {
       rawMessage.toLowerCase().includes('duplicate key')
     ) {
       throw new Error(DUPLICATE_DISPLAY_NAME_MESSAGE);
+    }
+
+    if (
+      rawMessage.includes(SETTLEMENT_EXPENSE_GUARD_MESSAGE) ||
+      rawMessage.toLowerCase().includes('void the related settlement')
+    ) {
+      throw new Error(SETTLEMENT_EXPENSE_GUARD_MESSAGE);
     }
 
     const messageParts = [
@@ -431,4 +453,20 @@ export async function markSettlementPaid(
 
   const row = unwrapJsonObject(data, 'mark_settlement_paid');
   return mapWorkspaceForRpc(row, 'mark_settlement_paid');
+}
+
+export async function voidSettlement(
+  settlementId: string,
+  reason: string
+): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('void_settlement', {
+    settlement_id_input: settlementId,
+    reason_input: reason,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'void_settlement');
+  return mapWorkspaceForRpc(row, 'void_settlement');
 }

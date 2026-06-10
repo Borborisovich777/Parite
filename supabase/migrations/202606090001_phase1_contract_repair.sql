@@ -53,7 +53,10 @@ create table if not exists public.expenses (
   notes text not null default '',
   created_by_member_id uuid not null references public.members(id),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  deleted_by_member_id uuid references public.members(id),
+  delete_reason text
 );
 
 create table if not exists public.expense_splits (
@@ -83,11 +86,14 @@ create table if not exists public.settlements (
   to_member_id uuid not null references public.members(id),
   amount numeric(14,2) not null check (amount > 0),
   currency public.currency_code not null,
-  status text not null default 'paid' check (status in ('pending', 'paid')),
+  status text not null default 'paid' check (status in ('pending', 'paid', 'voided')),
   created_by_member_id uuid not null references public.members(id),
   paid_confirmed_by_member_id uuid references public.members(id),
   created_at timestamptz not null default now(),
-  paid_at timestamptz
+  paid_at timestamptz,
+  voided_at timestamptz,
+  voided_by_member_id uuid references public.members(id),
+  void_reason text
 );
 
 alter table public.trips add column if not exists id uuid default gen_random_uuid();
@@ -162,6 +168,9 @@ alter table public.expenses add column if not exists notes text not null default
 alter table public.expenses add column if not exists created_by_member_id uuid references public.members(id);
 alter table public.expenses add column if not exists created_at timestamptz not null default now();
 alter table public.expenses add column if not exists updated_at timestamptz not null default now();
+alter table public.expenses add column if not exists deleted_at timestamptz;
+alter table public.expenses add column if not exists deleted_by_member_id uuid references public.members(id);
+alter table public.expenses add column if not exists delete_reason text;
 
 alter table public.expense_splits add column if not exists id uuid default gen_random_uuid();
 alter table public.expense_splits add column if not exists expense_id uuid references public.expenses(id) on delete cascade;
@@ -187,6 +196,29 @@ alter table public.settlements add column if not exists created_by_member_id uui
 alter table public.settlements add column if not exists paid_confirmed_by_member_id uuid references public.members(id);
 alter table public.settlements add column if not exists created_at timestamptz not null default now();
 alter table public.settlements add column if not exists paid_at timestamptz;
+alter table public.settlements add column if not exists voided_at timestamptz;
+alter table public.settlements add column if not exists voided_by_member_id uuid references public.members(id);
+alter table public.settlements add column if not exists void_reason text;
+
+do $$
+declare
+  constraint_record record;
+begin
+  for constraint_record in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.settlements'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%status%'
+      and pg_get_constraintdef(oid) ilike '%paid%'
+  loop
+    execute format('alter table public.settlements drop constraint if exists %I', constraint_record.conname);
+  end loop;
+end $$;
+
+alter table public.settlements
+  add constraint settlements_status_check
+  check (status in ('pending', 'paid', 'voided'));
 
 update public.members
 set role = 'member'
@@ -241,6 +273,7 @@ create index if not exists members_access_token_idx on public.members (access_to
 create index if not exists expenses_trip_idx on public.expenses (trip_id);
 create index if not exists expenses_paid_by_member_idx on public.expenses (paid_by_member_id);
 create index if not exists expenses_created_by_member_idx on public.expenses (created_by_member_id);
+create index if not exists expenses_active_trip_idx on public.expenses (trip_id, created_at) where deleted_at is null;
 create index if not exists expense_splits_expense_idx on public.expense_splits (expense_id);
 create index if not exists expense_splits_member_idx on public.expense_splits (member_id);
 create unique index if not exists expense_splits_expense_member_unique_idx
@@ -255,6 +288,8 @@ create index if not exists settlements_to_member_idx on public.settlements (to_m
 create index if not exists settlements_confirmed_by_member_idx on public.settlements (paid_confirmed_by_member_id);
 create index if not exists settlements_recent_paid_lookup_idx
   on public.settlements (trip_id, from_member_id, to_member_id, currency, status, created_at desc);
+create index if not exists settlements_paid_after_expense_guard_idx
+  on public.settlements (trip_id, status, paid_at, created_at);
 
 alter table public.trips enable row level security;
 alter table public.members enable row level security;
@@ -363,13 +398,15 @@ begin
   select coalesce(jsonb_agg(to_jsonb(e) order by e.expense_date desc, e.created_at desc), '[]'::jsonb)
   into trip_expenses
   from public.expenses e
-  where e.trip_id = current_member.trip_id;
+  where e.trip_id = current_member.trip_id
+    and e.deleted_at is null;
 
   select coalesce(jsonb_agg(to_jsonb(s) order by s.id), '[]'::jsonb)
   into trip_splits
   from public.expense_splits s
   join public.expenses e on e.id = s.expense_id
-  where e.trip_id = current_member.trip_id;
+  where e.trip_id = current_member.trip_id
+    and e.deleted_at is null;
 
   select coalesce(jsonb_agg(to_jsonb(r) order by r.from_currency, r.to_currency), '[]'::jsonb)
   into trip_exchange_rates
@@ -1200,6 +1237,10 @@ begin
     raise exception 'Expense not found';
   end if;
 
+  if target_expense.deleted_at is not null then
+    raise exception 'Expense has already been deleted';
+  end if;
+
   select *
   into target_trip
   from public.trips
@@ -1223,6 +1264,16 @@ begin
   if target_expense.created_by_member_id <> current_member.id
     and current_member.role <> 'admin' then
     raise exception 'Only the expense creator or trip admin can update this expense';
+  end if;
+
+  if exists (
+    select 1
+    from public.settlements settlement
+    where settlement.trip_id = target_expense.trip_id
+      and settlement.status = 'paid'
+      and coalesce(settlement.paid_at, settlement.created_at) >= target_expense.created_at
+  ) then
+    raise exception 'This expense was created before a paid settlement. Void the related settlement before changing it.';
   end if;
 
   if char_length(trim(coalesce(title_input, ''))) = 0 then
@@ -1327,6 +1378,10 @@ begin
     raise exception 'Expense not found';
   end if;
 
+  if target_expense.deleted_at is not null then
+    raise exception 'Expense has already been deleted';
+  end if;
+
   select *
   into current_member
   from public.members
@@ -1343,7 +1398,22 @@ begin
     raise exception 'Only the expense creator or trip admin can delete this expense';
   end if;
 
-  delete from public.expenses where id = expense_id_input;
+  if exists (
+    select 1
+    from public.settlements settlement
+    where settlement.trip_id = target_expense.trip_id
+      and settlement.status = 'paid'
+      and coalesce(settlement.paid_at, settlement.created_at) >= target_expense.created_at
+  ) then
+    raise exception 'This expense was created before a paid settlement. Void the related settlement before changing it.';
+  end if;
+
+  update public.expenses
+  set deleted_at = now(),
+      deleted_by_member_id = current_member.id,
+      delete_reason = 'Deleted by expense owner or trip admin.',
+      updated_at = now()
+  where id = expense_id_input;
 
   return public.load_auth_workspace(current_member.id);
 end;
@@ -1487,6 +1557,70 @@ begin
 end;
 $$;
 
+create or replace function public.void_settlement(
+  settlement_id_input uuid,
+  reason_input text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  caller_member public.members;
+  target_settlement public.settlements;
+  normalized_reason text;
+begin
+  if current_user_id is null then
+    raise exception 'Sign in required';
+  end if;
+
+  select *
+  into target_settlement
+  from public.settlements
+  where id = settlement_id_input;
+
+  if target_settlement.id is null then
+    raise exception 'Settlement not found';
+  end if;
+
+  select *
+  into caller_member
+  from public.members
+  where user_id = current_user_id
+    and trip_id = target_settlement.trip_id
+    and status = 'approved';
+
+  if caller_member.id is null then
+    raise exception 'Approved trip member access required';
+  end if;
+
+  if caller_member.role <> 'admin' and caller_member.id <> target_settlement.to_member_id then
+    raise exception 'Only the receiver or a trip admin can void this settlement';
+  end if;
+
+  if target_settlement.status = 'voided' then
+    return public.load_auth_workspace(caller_member.id);
+  end if;
+
+  if target_settlement.status <> 'paid' then
+    raise exception 'Only paid settlements can be voided';
+  end if;
+
+  normalized_reason := nullif(trim(coalesce(reason_input, '')), '');
+
+  update public.settlements
+  set status = 'voided',
+      voided_at = now(),
+      voided_by_member_id = caller_member.id,
+      void_reason = coalesce(normalized_reason, 'Voided by receiver or trip admin.')
+  where id = settlement_id_input;
+
+  return public.load_auth_workspace(caller_member.id);
+end;
+$$;
+
 grant execute on function public.create_trip_with_admin(text, public.currency_code, text) to anon, authenticated;
 grant execute on function public.request_join_by_invite(text, text) to anon, authenticated;
 grant execute on function public.load_member_session(text) to anon, authenticated;
@@ -1505,3 +1639,4 @@ grant execute on function public.create_expense_with_splits(uuid, text, numeric,
 grant execute on function public.update_expense_with_splits(uuid, text, numeric, public.currency_code, numeric, numeric, uuid, date, text, jsonb) to authenticated;
 grant execute on function public.delete_expense(uuid) to authenticated;
 grant execute on function public.mark_settlement_paid(uuid, uuid, uuid, numeric) to authenticated;
+grant execute on function public.void_settlement(uuid, text) to authenticated;

@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement } from '../types';
 import {
   calculateConvertedAmount,
   calculateEqualSplits,
-  calculateMemberBalances,
+  calculateOpenMemberBalances,
   calculateSmartCustomSplits,
 } from '../lib/calculations';
 import { isDecimalInputValue, isMoneyInputValue, parsePositiveDecimal } from '../lib/decimalInput';
@@ -29,6 +29,7 @@ interface ExpensesTabProps {
   currentMember: Member;
   expenses: Expense[];
   splits: ExpenseSplit[];
+  settlements: Settlement[];
   exchangeRates?: ExchangeRate[];
   members: Member[];
   onCreateExpense: (
@@ -68,6 +69,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   currentMember,
   expenses,
   splits,
+  settlements,
   exchangeRates = [],
   members,
   onCreateExpense,
@@ -152,7 +154,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     .map(id => approvedMembers.find(member => member.id === id)?.display_name)
     .filter(Boolean);
   const totalSpending = expenses.reduce((sum, expense) => sum + expense.converted_amount, 0);
-  const balances = calculateMemberBalances(expenses, splits, approvedMembers);
+  const balances = calculateOpenMemberBalances(expenses, splits, settlements, approvedMembers);
   const currentUserBalance = balances.find(balance => balance.member_id === currentMember.id);
   const userBalanceDisplay = formatDisplayMoney(
     currentUserBalance?.net_balance ?? 0,
@@ -1434,7 +1436,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   <button
                     type="button"
                     id="btn-delete-confirm-open"
-                    onClick={() => setShowDeleteConfirm(true)}
+                    onClick={() => {
+                      setFormError(null);
+                      setShowDeleteConfirm(true);
+                    }}
                     className="flex items-center justify-center gap-2 bg-[var(--color-negative)] text-slate-950 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1463,6 +1468,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 This will remove the expense and recalculate balances for the trip.
               </p>
             </div>
+
+            {formError && (
+              <div className="bg-rose-950/45 border border-rose-800/70 text-rose-200 p-3 rounded-2xl text-xs flex gap-2 items-start">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{formError}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <button
