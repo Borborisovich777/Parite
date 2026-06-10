@@ -31,6 +31,7 @@ import {
   updateExchangeRate,
   updateExpenseWithSplits,
   updateMemberDisplayCurrency,
+  voidSettlement,
   WorkspaceSummary,
 } from './lib/tripRepository';
 import {
@@ -591,6 +592,18 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setActionError(error instanceof Error ? error.message : 'Could not mark settlement as paid.');
+      throw error;
+    }
+  };
+
+  const handleVoidSettlement = async (settlementId: string, reason: string) => {
+    try {
+      const nextWorkspace = await voidSettlement(settlementId, reason);
+      applyWorkspace(nextWorkspace);
+      setActionError(null);
+    } catch (error) {
+      console.error(error);
+      setActionError(error instanceof Error ? error.message : 'Could not void settlement.');
       throw error;
     }
   };
@@ -1217,6 +1230,7 @@ export default function App() {
                     currentMember={currentMember}
                     expenses={tripExpenses}
                     splits={tripSplits}
+                    settlements={tripSettlements}
                     exchangeRates={tripExchangeRates}
                     members={tripMembers}
                     onCreateExpense={handleCreateExpense}
@@ -1239,6 +1253,7 @@ export default function App() {
                     members={tripMembers}
                     settlements={tripSettlements}
                     onMarkSettlementPaid={handleMarkSettlementPaid}
+                    onVoidSettlement={handleVoidSettlement}
                   />
                 )}
 

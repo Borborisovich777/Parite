@@ -282,45 +282,57 @@ export function calculateMemberBalances(
   });
 }
 
+export function applyPaidSettlementsToBalances(
+  balances: MemberBalance[],
+  settlements: Settlement[]
+): MemberBalance[] {
+  const paidSettlements = settlements.filter(settlement => settlement.status === 'paid');
+
+  return balances.map(balance => {
+    const paidSent = paidSettlements
+      .filter(settlement => settlement.from_member_id === balance.member_id)
+      .reduce((sum, settlement) => sum + settlement.amount, 0);
+
+    const paidReceived = paidSettlements
+      .filter(settlement => settlement.to_member_id === balance.member_id)
+      .reduce((sum, settlement) => sum + settlement.amount, 0);
+
+    return {
+      ...balance,
+      net_balance: Math.round((balance.net_balance + paidSent - paidReceived) * 100) / 100,
+    };
+  });
+}
+
+export function calculateOpenMemberBalances(
+  expenses: Expense[],
+  splits: ExpenseSplit[],
+  settlements: Settlement[],
+  approvedMembers: Member[]
+): MemberBalance[] {
+  return applyPaidSettlementsToBalances(
+    calculateMemberBalances(expenses, splits, approvedMembers),
+    settlements
+  );
+}
+
 /**
  * Calculates settlements / recommendations to resolve net balances.
  * Uses the greedy algorithm matching debtors and creditors.
- * Adjusts initial net balances by subtracting paid settlements:
- * - payer's (from) balance increases by settlement amount (becomes closer to zero or positive)
- * - receiver's (to) balance decreases by settlement amount (becomes closer to zero or negative)
+ * Expects balances to already represent open balances after paid settlement adjustment.
  */
 export function calculateSettlementRecommendations(
   balances: MemberBalance[],
-  settlements: Settlement[],
+  _settlements: Settlement[],
   baseCurrency: Currency
 ): SettlementRecommendation[] {
-  // 1. Compute adjusted net balance for each member, taking paid settlements into account.
-  // Net balance is: total_paid - total_owed
-  // If someone has net_balance = -50, they owe 50.
-  // If they made a paid settlement of 30, they now only owe 20 (adjusted balance shifts from -50 to -20).
-  // If someone has net_balance = +50, they are owed 50.
-  // If they received a paid settlement of 30, they are now only owed 20 (adjusted balance shifts from +50 to +20).
-  const adjustedBalances = balances.map(b => {
-    let balance = b.net_balance;
-    const paidSettlements = settlements.filter(s => s.status === 'paid');
-    
-    // Add paid settlements where this member paid another member (increasing their balance towards zero/positive)
-    const paidSent = paidSettlements
-      .filter(s => s.from_member_id === b.member_id)
-      .reduce((sum, s) => sum + s.amount, 0);
-      
-    // Subtract paid settlements where this member received payment (decreasing their balance towards zero/negative)
-    const paidReceived = paidSettlements
-      .filter(s => s.to_member_id === b.member_id)
-      .reduce((sum, s) => sum + s.amount, 0);
+  void _settlements;
 
-    balance = balance + paidSent - paidReceived;
-    return {
-      id: b.member_id,
-      name: b.display_name,
-      balance: Math.round(balance * 100) / 100
-    };
-  });
+  const adjustedBalances = balances.map(balance => ({
+    id: balance.member_id,
+    name: balance.display_name,
+    balance: Math.round(balance.net_balance * 100) / 100,
+  }));
 
   // Split into debtors and creditors
   // We use a safe margin of 0.01 CNY to ignore floating-point rounding dust near zero

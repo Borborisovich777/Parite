@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Trip, Member, Expense, ExpenseSplit, Settlement, ExchangeRate } from '../types';
-import { calculateMemberBalances, calculateSettlementRecommendations } from '../lib/calculations';
+import { calculateOpenMemberBalances, calculateSettlementRecommendations } from '../lib/calculations';
 import { formatDisplayMoney, getMemberDisplayCurrency } from '../lib/exchangeRates';
-import { CheckCircle2, Clock, History, Scale } from 'lucide-react';
+import { CheckCircle2, Clock, History, RotateCcw, Scale } from 'lucide-react';
 
 interface BalancesTabProps {
   trip: Trip;
@@ -13,6 +13,7 @@ interface BalancesTabProps {
   members: Member[];
   settlements: Settlement[];
   onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number) => void | Promise<void>;
+  onVoidSettlement: (settlementId: string, reason: string) => void | Promise<void>;
 }
 
 export const BalancesTab: React.FC<BalancesTabProps> = ({
@@ -24,14 +25,17 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   members,
   settlements,
   onMarkSettlementPaid,
+  onVoidSettlement,
 }) => {
   const approvedMembers = members.filter(member => member.status === 'approved');
   const [activeSubTab, setActiveSubTab] = useState<'recommendations' | 'history'>('recommendations');
   const [busySettlementKey, setBusySettlementKey] = useState<string | null>(null);
 
-  const balances = calculateMemberBalances(expenses, splits, approvedMembers);
+  const balances = calculateOpenMemberBalances(expenses, splits, settlements, approvedMembers);
   const recommendations = calculateSettlementRecommendations(balances, settlements, trip.base_currency);
-  const paidSettlementsList = settlements.filter(settlement => settlement.status === 'paid');
+  const settlementHistoryList = settlements.filter(settlement =>
+    settlement.status === 'paid' || settlement.status === 'voided'
+  );
   const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
 
   return (
@@ -141,10 +145,10 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
               : 'text-slate-500 hover:text-slate-300'
           }`}
         >
-          Paid log
-          {paidSettlementsList.length > 0 && (
+          Settlement history
+          {settlementHistoryList.length > 0 && (
             <span className="ml-1.5 bg-slate-700 text-slate-100 text-[9px] px-1.5 rounded-full">
-              {paidSettlementsList.length}
+              {settlementHistoryList.length}
             </span>
           )}
         </button>
@@ -250,18 +254,21 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
         </section>
       ) : (
         <section className="flex flex-col gap-2">
-          {paidSettlementsList.length === 0 ? (
+          {settlementHistoryList.length === 0 ? (
             <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-3xl bg-[#1a1d23]">
               <History className="w-9 h-9 text-slate-700 mx-auto mb-3" />
-              <p className="text-sm text-slate-300 font-semibold">No paid settlements yet</p>
-              <p className="text-xs text-slate-500 mt-1">Paid transfers will appear here.</p>
+              <p className="text-sm text-slate-300 font-semibold">No settlement history yet</p>
+              <p className="text-xs text-slate-500 mt-1">Paid and voided transfers will appear here.</p>
             </div>
           ) : (
-            [...paidSettlementsList]
+            [...settlementHistoryList]
               .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
               .map(settlement => {
-                const fromMember = approvedMembers.find(member => member.id === settlement.from_member_id);
-                const toMember = approvedMembers.find(member => member.id === settlement.to_member_id);
+                const fromMember = members.find(member => member.id === settlement.from_member_id);
+                const toMember = members.find(member => member.id === settlement.to_member_id);
+                const isVoided = settlement.status === 'voided';
+                const canVoidSettlement = settlement.status === 'paid'
+                  && (currentMember.role === 'admin' || currentMember.id === settlement.to_member_id);
                 const settlementDisplay = formatDisplayMoney(
                   settlement.amount,
                   trip.base_currency,
@@ -274,28 +281,67 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                   <div
                     key={settlement.id}
                     id={`historic-settlement-${settlement.id}`}
-                    className="bg-[#1a1d23] border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3"
+                    className="bg-[#1a1d23] border border-slate-800 rounded-2xl p-4 flex flex-col gap-3"
                   >
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-200 leading-relaxed">
-                        <strong>{fromMember ? fromMember.display_name : 'Removed member'}</strong>
-                        {' paid '}
-                        <strong>{toMember ? toMember.display_name : 'Removed member'}</strong>
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1 mt-1">
-                        <Clock className="w-3 h-3" />
-                        {settlement.paid_at ? new Date(settlement.paid_at).toLocaleDateString() : 'No date'}
-                      </p>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm text-slate-200 leading-relaxed">
+                          <strong>{fromMember ? fromMember.display_name : 'Removed member'}</strong>
+                          {' paid '}
+                          <strong>{toMember ? toMember.display_name : 'Removed member'}</strong>
+                        </p>
+                        <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1 mt-1">
+                          <Clock className="w-3 h-3" />
+                          {settlement.paid_at ? new Date(settlement.paid_at).toLocaleDateString() : 'No date'}
+                        </p>
+                        {isVoided && (
+                          <p className="text-[10px] text-rose-300 mt-1">
+                            Voided{settlement.void_reason ? `: ${settlement.void_reason}` : ''}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className={`text-right font-mono font-bold text-xs shrink-0 ${
+                        isVoided ? 'text-slate-500 line-through' : 'text-emerald-300'
+                      }`}>
+                        {settlementDisplay.primary}
+                        {settlementDisplay.secondary && (
+                          <span className="block text-[10px] text-slate-500 mt-0.5">
+                            {settlementDisplay.secondary}
+                          </span>
+                        )}
+                        {isVoided && (
+                          <span className="block text-[10px] text-rose-300 mt-1 no-underline">
+                            Voided
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="text-right font-mono font-bold text-xs shrink-0 text-emerald-300">
-                      {settlementDisplay.primary}
-                      {settlementDisplay.secondary && (
-                        <span className="block text-[10px] text-slate-500 mt-0.5">
-                          {settlementDisplay.secondary}
-                        </span>
-                      )}
-                    </div>
+                    {canVoidSettlement && (
+                      <button
+                        type="button"
+                        id={`btn-void-settlement-${settlement.id}`}
+                        onClick={async () => {
+                          setBusySettlementKey(`void-${settlement.id}`);
+                          try {
+                            await onVoidSettlement(
+                              settlement.id,
+                              'Voided before changing related expenses.'
+                            );
+                          } catch (error) {
+                            console.error(error);
+                          } finally {
+                            setBusySettlementKey(null);
+                          }
+                        }}
+                        disabled={busySettlementKey === `void-${settlement.id}`}
+                        className="min-h-10 rounded-2xl border border-rose-900/40 bg-rose-950/30 text-rose-200 disabled:opacity-60 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        {busySettlementKey === `void-${settlement.id}` ? 'Voiding...' : 'Void settlement'}
+                      </button>
+                    )}
                   </div>
                 );
               })

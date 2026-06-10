@@ -39,6 +39,9 @@ export interface Expense {
   created_by_member_id: string;
   created_at: string;
   updated_at: string;
+  deleted_at?: string;
+  deleted_by_member_id?: string;
+  delete_reason?: string;
 }
 
 export interface ExpenseSplit {
@@ -65,11 +68,14 @@ export interface Settlement {
   to_member_id: string; // creditor
   amount: number; // in base currency
   currency: Currency; // usually matching trip base currency
-  status: 'pending' | 'paid';
+  status: 'pending' | 'paid' | 'voided';
   created_by_member_id?: string;
   paid_confirmed_by_member_id?: string;
   created_at: string;
   paid_at?: string;
+  voided_at?: string;
+  voided_by_member_id?: string;
+  void_reason?: string;
 }
 
 export interface MemberBalance {
