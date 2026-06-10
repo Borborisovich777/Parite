@@ -1,4 +1,4 @@
-import { Currency, ExchangeRate, Expense, ExpenseSplit, Member, Trip } from '../types';
+import { Currency, ExchangeRate, Expense, ExpenseSplit, Member, Settlement, Trip } from '../types';
 import { toCurrency } from './exchangeRates';
 import { requireSupabase } from './supabase';
 
@@ -8,7 +8,22 @@ export interface PhaseOneWorkspace {
   members: Member[];
   expenses: Expense[];
   splits: ExpenseSplit[];
+  settlements: Settlement[];
   exchangeRates: ExchangeRate[];
+}
+
+export interface WorkspaceSummary {
+  member_id: string;
+  trip_id: string;
+  trip_name: string;
+  base_currency: Currency;
+  display_name: string;
+  role: Member['role'];
+  status: Member['status'];
+  display_currency: Currency | null;
+  created_at: string;
+  approved_at?: string;
+  removed_at?: string;
 }
 
 type Row = Record<string, any>;
@@ -91,6 +106,38 @@ function mapExchangeRate(row: Row): ExchangeRate {
   };
 }
 
+function mapSettlement(row: Row): Settlement {
+  return {
+    id: row.id,
+    trip_id: row.trip_id,
+    from_member_id: row.from_member_id,
+    to_member_id: row.to_member_id,
+    amount: Number(row.amount),
+    currency: toCurrency(row.currency),
+    status: row.status,
+    created_by_member_id: row.created_by_member_id ?? undefined,
+    paid_confirmed_by_member_id: row.paid_confirmed_by_member_id ?? undefined,
+    created_at: row.created_at,
+    paid_at: row.paid_at ?? undefined,
+  };
+}
+
+function mapWorkspaceSummary(row: Row): WorkspaceSummary {
+  return {
+    member_id: row.member_id,
+    trip_id: row.trip_id,
+    trip_name: row.trip_name,
+    base_currency: toCurrency(row.base_currency),
+    display_name: row.display_name,
+    role: row.role,
+    status: row.status,
+    display_currency: row.display_currency ? toCurrency(row.display_currency) : null,
+    created_at: row.created_at,
+    approved_at: row.approved_at ?? undefined,
+    removed_at: row.removed_at ?? undefined,
+  };
+}
+
 function unwrapJsonObject(data: unknown, rpcName: string): Row {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error(`${rpcName} did not return an object.`);
@@ -106,6 +153,7 @@ function mapWorkspace(row: Row): PhaseOneWorkspace {
     members: Array.isArray(row.members) ? row.members.map(mapMember) : [],
     expenses: Array.isArray(row.expenses) ? row.expenses.map(mapExpense) : [],
     splits: Array.isArray(row.splits) ? row.splits.map(mapExpenseSplit) : [],
+    settlements: Array.isArray(row.settlements) ? row.settlements.map(mapSettlement) : [],
     exchangeRates: Array.isArray(row.exchangeRates) ? row.exchangeRates.map(mapExchangeRate) : [],
   };
 
@@ -191,6 +239,15 @@ export async function loadAuthWorkspace(memberId?: string | null): Promise<Phase
 
   const row = unwrapJsonObject(data, 'load_auth_workspace');
   return mapWorkspaceForRpc(row, 'load_auth_workspace');
+}
+
+export async function listMyWorkspaces(): Promise<WorkspaceSummary[]> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('list_my_workspaces');
+
+  if (error) throwSupabaseError(error);
+
+  return Array.isArray(data) ? data.map(mapWorkspaceSummary) : [];
 }
 
 export async function claimLegacyMember(accessToken: string): Promise<PhaseOneWorkspace> {
@@ -354,4 +411,24 @@ export async function deleteExpense(expenseId: string): Promise<PhaseOneWorkspac
 
   const row = unwrapJsonObject(data, 'delete_expense');
   return mapWorkspaceForRpc(row, 'delete_expense');
+}
+
+export async function markSettlementPaid(
+  tripId: string,
+  fromMemberId: string,
+  toMemberId: string,
+  amount: number
+): Promise<PhaseOneWorkspace> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('mark_settlement_paid', {
+    trip_id_input: tripId,
+    from_member_id_input: fromMemberId,
+    to_member_id_input: toMemberId,
+    amount_input: amount,
+  });
+
+  if (error) throwSupabaseError(error);
+
+  const row = unwrapJsonObject(data, 'mark_settlement_paid');
+  return mapWorkspaceForRpc(row, 'mark_settlement_paid');
 }

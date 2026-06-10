@@ -3,6 +3,7 @@ import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate } from '../
 import {
   calculateConvertedAmount,
   calculateEqualSplits,
+  calculateMemberBalances,
   calculateSmartCustomSplits,
 } from '../lib/calculations';
 import { isDecimalInputValue, isMoneyInputValue, parsePositiveDecimal } from '../lib/decimalInput';
@@ -12,13 +13,14 @@ import {
   ArrowLeft,
   Calendar,
   Check,
-  ChevronLeft,
   Edit2,
   Plus,
+  Receipt,
   Search,
   SlidersHorizontal,
   Trash2,
   Users,
+  Wallet,
   X,
 } from 'lucide-react';
 
@@ -149,6 +151,28 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const participantNames = formParticipants
     .map(id => approvedMembers.find(member => member.id === id)?.display_name)
     .filter(Boolean);
+  const totalSpending = expenses.reduce((sum, expense) => sum + expense.converted_amount, 0);
+  const balances = calculateMemberBalances(expenses, splits, approvedMembers);
+  const currentUserBalance = balances.find(balance => balance.member_id === currentMember.id);
+  const userBalanceDisplay = formatDisplayMoney(
+    currentUserBalance?.net_balance ?? 0,
+    tripBaseCurrency,
+    displayCurrency,
+    safeExchangeRates,
+    trip.id
+  );
+  const totalSpendingDisplay = formatDisplayMoney(
+    totalSpending,
+    tripBaseCurrency,
+    displayCurrency,
+    safeExchangeRates,
+    trip.id
+  );
+  const balanceLabel = !currentUserBalance || Math.abs(currentUserBalance.net_balance) <= 0.01
+    ? 'Settled up'
+    : currentUserBalance.net_balance > 0
+      ? 'You are owed'
+      : 'You owe';
 
   const equalPreviewSplits = useMemo(
     () => hasValidConvertedAmount ? calculateEqualSplits(convertedAmount, formParticipants) : [],
@@ -164,13 +188,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   );
 
   const filteredExpenses = expenses.filter(expense => {
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+
     const paidByMember = approvedMembers.find(m => m.id === expense.paid_by_member_id);
-    return (
-      expense.title.toLowerCase().includes(q) ||
-      (expense.notes?.toLowerCase().includes(q) ?? false) ||
-      (paidByMember?.display_name.toLowerCase().includes(q) ?? false)
-    );
+    const searchable = [
+      expense.title,
+      expense.notes ?? '',
+      paidByMember?.display_name ?? '',
+      expense.amount.toString(),
+      expense.amount.toFixed(2),
+      expense.converted_amount.toString(),
+      expense.converted_amount.toFixed(2),
+      expense.currency,
+      tripBaseCurrency,
+      expense.expense_date,
+      new Date(`${expense.expense_date}T00:00:00`).toLocaleDateString(),
+    ].join(' ').toLowerCase();
+
+    return searchable.includes(q);
   }).sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime());
 
   const detailExpense = expenses.find(e => e.id === selectedExpenseIdForDetail);
@@ -458,6 +494,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     : `${formParticipants.length} people`;
   const firstEqualSplit = equalPreviewSplits[0]?.amount_owed ?? 0;
   const customSplitTotal = smartCustomSplitResult.splits.reduce((sum, item) => sum + item.amount_owed, 0);
+  const convertedTotalDisplay = hasValidConvertedAmount
+    ? formatDisplayMoney(convertedAmount, tripBaseCurrency, displayCurrency, safeExchangeRates, trip.id)
+    : null;
+  const customSplitTotalDisplay = formatDisplayMoney(
+    customSplitTotal,
+    tripBaseCurrency,
+    displayCurrency,
+    safeExchangeRates,
+    trip.id
+  );
   const rateSourceText = isBaseCurrencyExpense
     ? 'Same as base currency'
     : useCustomExchangeRate
@@ -927,6 +973,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             ? 'bg-[#121418] border-slate-800 text-slate-500'
                             : 'bg-rose-950/30 border-rose-900/40 text-rose-200'
                         }`}>
+                          <div className="mb-2 border-b border-slate-800 pb-2">
+                            <p className="font-mono text-slate-200">
+                              Total: {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                            </p>
+                            {convertedTotalDisplay?.converted && (
+                              <p className="font-mono text-indigo-300 mt-1">
+                                {convertedTotalDisplay.primary}
+                              </p>
+                            )}
+                            {convertedTotalDisplay?.helper && (
+                              <p className="mt-1">{convertedTotalDisplay.helper}</p>
+                            )}
+                          </div>
                           <p>
                             Remaining to distribute: {smartCustomSplitResult.remainingAmount.toFixed(2)} {tripBaseCurrency}
                           </p>
@@ -965,7 +1024,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                                 )}
                                 {displaySplitEquivalent.converted && (
                                   <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                    {displaySplitEquivalent.primary}
+                                    {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
                                   </span>
                                 )}
                               </span>
@@ -994,10 +1053,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         })}
                         <div className="flex justify-between border-t border-slate-800 pt-3 text-xs">
                           <span className="text-slate-500">Calculated total</span>
-                          <span className="font-mono text-slate-200">
-                            {customSplitTotal.toFixed(2)}
-                            {' / '}
-                            {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                          <span className="font-mono text-slate-200 text-right">
+                            <span className="block">
+                              {customSplitTotal.toFixed(2)}
+                              {' / '}
+                              {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                            </span>
+                            {customSplitTotalDisplay.converted && (
+                              <span className="block text-[10px] text-slate-500 mt-0.5">
+                                {customSplitTotalDisplay.primary}
+                              </span>
+                            )}
                           </span>
                         </div>
                       </div>
@@ -1094,7 +1160,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   Expenses
                 </h1>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {expenses.length} total in this trip
+                  {trip.name} - Base {tripBaseCurrency}
                 </p>
               </div>
 
@@ -1109,13 +1175,63 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </button>
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-[#1a1d23] border border-slate-800/80 p-4">
+                <div className="flex items-center gap-2 text-slate-400 text-xs font-medium mb-3">
+                  <span className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center">
+                    <Wallet className="w-4 h-4" />
+                  </span>
+                  <span>Your balance</span>
+                </div>
+                <p
+                  id="user-net-balance"
+                  className={`text-xl font-bold font-display leading-none ${
+                    currentUserBalance && currentUserBalance.net_balance > 0.01
+                      ? 'text-emerald-400'
+                      : currentUserBalance && currentUserBalance.net_balance < -0.01
+                        ? 'text-rose-300'
+                        : 'text-slate-300'
+                  }`}
+                >
+                  {currentUserBalance && currentUserBalance.net_balance > 0 ? '+' : ''}
+                  {userBalanceDisplay.primary}
+                </p>
+                {userBalanceDisplay.secondary && (
+                  <p className="text-[10px] text-slate-500 mt-1 font-mono">{userBalanceDisplay.secondary}</p>
+                )}
+                {userBalanceDisplay.helper && (
+                  <p className="text-[10px] text-slate-500 mt-1">{userBalanceDisplay.helper}</p>
+                )}
+                <p className="text-[11px] text-slate-500 mt-2">{balanceLabel}</p>
+              </div>
+
+              <div className="rounded-2xl bg-[#1a1d23] border border-slate-800/80 p-4">
+                <div className="flex items-center gap-2 text-slate-400 text-xs font-medium mb-3">
+                  <span className="w-8 h-8 rounded-xl bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
+                    <Receipt className="w-4 h-4" />
+                  </span>
+                  <span>Total spent</span>
+                </div>
+                <p className="text-xl font-bold font-display text-white leading-none">
+                  {totalSpendingDisplay.primary}
+                </p>
+                {totalSpendingDisplay.secondary && (
+                  <p className="text-[10px] text-slate-500 mt-1 font-mono">{totalSpendingDisplay.secondary}</p>
+                )}
+                {totalSpendingDisplay.helper && (
+                  <p className="text-[10px] text-slate-500 mt-1">{totalSpendingDisplay.helper}</p>
+                )}
+                <p className="text-[11px] text-slate-500 mt-2">{expenses.length} expenses</p>
+              </div>
+            </div>
+
             <div className="relative">
               <input
                 type="text"
                 id="expense-search"
                 value={searchQuery}
                 onChange={event => setSearchQuery(event.target.value)}
-                placeholder="Search expenses"
+                placeholder="Search expenses..."
                 className="w-full bg-[#1a1d23] border border-slate-800/90 rounded-2xl pl-10 pr-4 py-3 text-sm focus:border-indigo-500 focus:outline-none text-slate-200 placeholder-slate-500"
               />
               <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500" />

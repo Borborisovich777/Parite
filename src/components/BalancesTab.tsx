@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trip, Member, Expense, ExpenseSplit, Settlement, Currency, ExchangeRate } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, Settlement, ExchangeRate } from '../types';
 import { calculateMemberBalances, calculateSettlementRecommendations } from '../lib/calculations';
 import { formatDisplayMoney, getMemberDisplayCurrency } from '../lib/exchangeRates';
 import { CheckCircle2, Clock, History, Scale } from 'lucide-react';
@@ -12,7 +12,7 @@ interface BalancesTabProps {
   exchangeRates?: ExchangeRate[];
   members: Member[];
   settlements: Settlement[];
-  onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number, currency: Currency) => void | Promise<void>;
+  onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number) => void | Promise<void>;
 }
 
 export const BalancesTab: React.FC<BalancesTabProps> = ({
@@ -163,6 +163,9 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           ) : (
             recommendations.map((recommendation, index) => {
               const isAdmin = currentMember.role === 'admin';
+              const isReceiver = currentMember.id === recommendation.to_member_id;
+              const canConfirmSettlement = isAdmin || isReceiver;
+              const confirmLabel = isReceiver && !isAdmin ? 'Confirm received' : 'Mark as paid';
               const settlementKey = `${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`;
               const recommendationDisplay = formatDisplayMoney(
                 recommendation.amount,
@@ -211,7 +214,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                     </div>
                   </div>
 
-                  {isAdmin ? (
+                  {canConfirmSettlement ? (
                     <button
                       type="button"
                       id={`btn-settle-${recommendation.from_member_id}-${recommendation.to_member_id}`}
@@ -221,8 +224,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                           await onMarkSettlementPaid(
                             recommendation.from_member_id,
                             recommendation.to_member_id,
-                            recommendation.amount,
-                            recommendation.currency
+                            recommendation.amount
                           );
                         } catch (error) {
                           console.error(error);
@@ -234,11 +236,11 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                       className="min-h-11 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-slate-950 font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      {busySettlementKey === settlementKey ? 'Saving...' : 'Mark as paid'}
+                      {busySettlementKey === settlementKey ? 'Saving...' : confirmLabel}
                     </button>
                   ) : (
                     <p className="text-xs text-slate-500 leading-normal">
-                      Admins can mark settlements as paid after the transfer is complete.
+                      The receiver or a trip admin can confirm this settlement after the transfer is complete.
                     </p>
                   )}
                 </div>
