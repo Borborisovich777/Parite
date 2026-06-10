@@ -3,12 +3,15 @@ import {
   ArrowLeft,
   Copy,
   LogOut,
+  Plus,
   Settings,
   ShieldCheck,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import { Currency, Member, Trip } from '../types';
+import { WorkspaceSummary } from '../lib/tripRepository';
 
 const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT'];
 
@@ -17,8 +20,13 @@ interface SideMenuProps {
   trip: Trip;
   currentMember: Member | null;
   accountEmail: string | null;
+  workspaces: WorkspaceSummary[];
+  currentMemberId: string | null;
   onClose: () => void;
-  onLeaveTrip: () => void;
+  onSwitchWorkspace: (memberId: string) => void | Promise<void>;
+  onShowTripSelection: () => void;
+  onCreateTrip: () => void;
+  onJoinTrip: () => void;
   onAdminTools: () => void;
   onExchangeRates: () => void;
   onUpdateDisplayCurrency: (displayCurrency: Currency | null) => Promise<void>;
@@ -30,8 +38,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   trip,
   currentMember,
   accountEmail,
+  workspaces,
+  currentMemberId,
   onClose,
-  onLeaveTrip,
+  onSwitchWorkspace,
+  onShowTripSelection,
+  onCreateTrip,
+  onJoinTrip,
   onAdminTools,
   onExchangeRates,
   onUpdateDisplayCurrency,
@@ -183,6 +196,66 @@ export const SideMenu: React.FC<SideMenuProps> = ({
           </section>
 
           <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
+                Trips
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  onShowTripSelection();
+                  onClose();
+                }}
+                className="text-[10px] font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer"
+              >
+                Switch trip
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {workspaces.map(workspace => {
+                const isActive = workspace.member_id === currentMemberId;
+                return (
+                  <button
+                    type="button"
+                    key={workspace.member_id}
+                    onClick={() => {
+                      if (!isActive) {
+                        onSwitchWorkspace(workspace.member_id);
+                      }
+                      onClose();
+                    }}
+                    className={`w-full rounded-2xl border px-3 py-3 text-left cursor-pointer ${
+                      isActive
+                        ? 'bg-indigo-500/10 border-indigo-500/35'
+                        : 'bg-[#121418] border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="text-sm font-bold text-slate-100 truncate block">
+                          {workspace.trip_name}
+                        </span>
+                        <span className="text-[10px] text-slate-500 mt-1 block truncate">
+                          {workspace.display_name} - {workspace.role}
+                        </span>
+                      </span>
+                      <span className="text-right shrink-0">
+                        <span className="text-[10px] font-mono font-bold text-indigo-300 block">
+                          {workspace.base_currency}
+                        </span>
+                        <span className="text-[9px] uppercase text-slate-500 block mt-1">
+                          {workspace.status}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
             <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">
               Display currency
             </label>
@@ -218,6 +291,32 @@ export const SideMenu: React.FC<SideMenuProps> = ({
           </section>
 
           <section className="flex flex-col gap-2">
+            <button
+              type="button"
+              id="btn-menu-create-trip"
+              onClick={() => {
+                onCreateTrip();
+                onClose();
+              }}
+              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+            >
+              <Plus className="w-4 h-4 text-indigo-300" />
+              Create trip
+            </button>
+
+            <button
+              type="button"
+              id="btn-menu-join-trip"
+              onClick={() => {
+                onJoinTrip();
+                onClose();
+              }}
+              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+            >
+              <UserPlus className="w-4 h-4 text-indigo-300" />
+              Join trip
+            </button>
+
             {isAdmin && currentMember?.status === 'approved' && (
               <>
                 <button
@@ -250,15 +349,15 @@ export const SideMenu: React.FC<SideMenuProps> = ({
 
             <button
               type="button"
-              id="btn-app-leave-trip"
+              id="btn-app-switch-trip"
               onClick={() => {
-                onLeaveTrip();
+                onShowTripSelection();
                 onClose();
               }}
-              className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 flex items-center gap-2 font-bold text-sm cursor-pointer"
+              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
             >
-              <ArrowLeft className="w-4 h-4" />
-              Exit workspace
+              <ArrowLeft className="w-4 h-4 text-indigo-300" />
+              Switch trip
             </button>
 
             <button

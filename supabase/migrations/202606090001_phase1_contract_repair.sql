@@ -76,6 +76,20 @@ create table if not exists public.exchange_rates (
   check (from_currency <> to_currency)
 );
 
+create table if not exists public.settlements (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references public.trips(id) on delete cascade,
+  from_member_id uuid not null references public.members(id),
+  to_member_id uuid not null references public.members(id),
+  amount numeric(14,2) not null check (amount > 0),
+  currency public.currency_code not null,
+  status text not null default 'paid' check (status in ('pending', 'paid')),
+  created_by_member_id uuid not null references public.members(id),
+  paid_confirmed_by_member_id uuid references public.members(id),
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+
 alter table public.trips add column if not exists id uuid default gen_random_uuid();
 alter table public.trips add column if not exists name text;
 alter table public.trips add column if not exists base_currency public.currency_code;
@@ -162,6 +176,18 @@ alter table public.exchange_rates add column if not exists rate numeric(18,8);
 alter table public.exchange_rates add column if not exists updated_by_member_id uuid references public.members(id);
 alter table public.exchange_rates add column if not exists updated_at timestamptz not null default now();
 
+alter table public.settlements add column if not exists id uuid default gen_random_uuid();
+alter table public.settlements add column if not exists trip_id uuid references public.trips(id) on delete cascade;
+alter table public.settlements add column if not exists from_member_id uuid references public.members(id);
+alter table public.settlements add column if not exists to_member_id uuid references public.members(id);
+alter table public.settlements add column if not exists amount numeric(14,2);
+alter table public.settlements add column if not exists currency public.currency_code;
+alter table public.settlements add column if not exists status text not null default 'paid';
+alter table public.settlements add column if not exists created_by_member_id uuid references public.members(id);
+alter table public.settlements add column if not exists paid_confirmed_by_member_id uuid references public.members(id);
+alter table public.settlements add column if not exists created_at timestamptz not null default now();
+alter table public.settlements add column if not exists paid_at timestamptz;
+
 update public.members
 set role = 'member'
 where role is null
@@ -223,12 +249,19 @@ create unique index if not exists exchange_rates_trip_pair_unique_idx
   on public.exchange_rates (trip_id, from_currency, to_currency);
 create index if not exists exchange_rates_trip_idx on public.exchange_rates (trip_id);
 create index if not exists exchange_rates_updated_by_member_idx on public.exchange_rates (updated_by_member_id);
+create index if not exists settlements_trip_idx on public.settlements (trip_id);
+create index if not exists settlements_from_member_idx on public.settlements (from_member_id);
+create index if not exists settlements_to_member_idx on public.settlements (to_member_id);
+create index if not exists settlements_confirmed_by_member_idx on public.settlements (paid_confirmed_by_member_id);
+create index if not exists settlements_recent_paid_lookup_idx
+  on public.settlements (trip_id, from_member_id, to_member_id, currency, status, created_at desc);
 
 alter table public.trips enable row level security;
 alter table public.members enable row level security;
 alter table public.expenses enable row level security;
 alter table public.expense_splits enable row level security;
 alter table public.exchange_rates enable row level security;
+alter table public.settlements enable row level security;
 
 drop function if exists public.create_trip_with_admin(text, text, text);
 drop function if exists public.restore_trip_access(text);
@@ -264,6 +297,7 @@ declare
   trip_expenses jsonb := '[]'::jsonb;
   trip_splits jsonb := '[]'::jsonb;
   trip_exchange_rates jsonb := '[]'::jsonb;
+  trip_settlements jsonb := '[]'::jsonb;
 begin
   if current_user_id is null then
     raise exception 'Sign in required';
@@ -291,6 +325,7 @@ begin
       'members', '[]'::jsonb,
       'expenses', '[]'::jsonb,
       'splits', '[]'::jsonb,
+      'settlements', '[]'::jsonb,
       'exchangeRates', '[]'::jsonb
     );
   end if;
@@ -302,6 +337,7 @@ begin
       'members', '[]'::jsonb,
       'expenses', '[]'::jsonb,
       'splits', '[]'::jsonb,
+      'settlements', '[]'::jsonb,
       'exchangeRates', '[]'::jsonb
     );
   end if;
@@ -340,15 +376,45 @@ begin
   from public.exchange_rates r
   where r.trip_id = current_member.trip_id;
 
+  select coalesce(jsonb_agg(to_jsonb(s) order by s.created_at desc), '[]'::jsonb)
+  into trip_settlements
+  from public.settlements s
+  where s.trip_id = current_member.trip_id;
+
   return jsonb_build_object(
     'trip', to_jsonb(current_trip),
     'member', to_jsonb(current_member) - 'access_token',
     'members', trip_members,
     'expenses', trip_expenses,
     'splits', trip_splits,
+    'settlements', trip_settlements,
     'exchangeRates', trip_exchange_rates
   );
 end;
+$$;
+
+create or replace function public.list_my_workspaces()
+returns jsonb
+language sql
+security definer
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'member_id', m.id,
+    'trip_id', t.id,
+    'trip_name', t.name,
+    'base_currency', t.base_currency,
+    'display_name', m.display_name,
+    'role', m.role,
+    'status', m.status,
+    'display_currency', m.display_currency,
+    'created_at', m.created_at,
+    'approved_at', m.approved_at,
+    'removed_at', m.removed_at
+  ) order by m.created_at desc), '[]'::jsonb)
+  from public.members m
+  join public.trips t on t.id = m.trip_id
+  where m.user_id = auth.uid();
 $$;
 
 create or replace function public.create_trip_with_admin(
@@ -1283,6 +1349,144 @@ begin
 end;
 $$;
 
+create or replace function public.mark_settlement_paid(
+  trip_id_input uuid,
+  from_member_id_input uuid,
+  to_member_id_input uuid,
+  amount_input numeric
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  current_trip public.trips;
+  caller_member public.members;
+  from_member public.members;
+  to_member public.members;
+  normalized_amount numeric(14,2);
+  existing_settlement public.settlements;
+  lock_key text;
+begin
+  if current_user_id is null then
+    raise exception 'Sign in required';
+  end if;
+
+  if amount_input is null or amount_input::text = 'NaN' or amount_input <= 0 then
+    raise exception 'Settlement amount must be greater than zero';
+  end if;
+
+  if from_member_id_input = to_member_id_input then
+    raise exception 'Settlement payer and receiver must be different members';
+  end if;
+
+  normalized_amount := round(amount_input, 2);
+
+  if normalized_amount <= 0 then
+    raise exception 'Settlement amount must be greater than zero';
+  end if;
+
+  select *
+  into current_trip
+  from public.trips
+  where id = trip_id_input;
+
+  if current_trip.id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  select *
+  into caller_member
+  from public.members
+  where user_id = current_user_id
+    and trip_id = trip_id_input
+    and status = 'approved';
+
+  if caller_member.id is null then
+    raise exception 'Approved trip member access required';
+  end if;
+
+  if caller_member.role <> 'admin' and caller_member.id <> to_member_id_input then
+    raise exception 'Only the receiver or a trip admin can confirm this settlement';
+  end if;
+
+  select *
+  into from_member
+  from public.members
+  where id = from_member_id_input
+    and trip_id = trip_id_input;
+
+  if from_member.id is null then
+    raise exception 'Settlement payer is not a member of this trip';
+  end if;
+
+  select *
+  into to_member
+  from public.members
+  where id = to_member_id_input
+    and trip_id = trip_id_input;
+
+  if to_member.id is null then
+    raise exception 'Settlement receiver is not a member of this trip';
+  end if;
+
+  lock_key := concat_ws(
+    ':',
+    trip_id_input::text,
+    from_member_id_input::text,
+    to_member_id_input::text,
+    normalized_amount::text,
+    current_trip.base_currency::text
+  );
+
+  perform pg_advisory_xact_lock(hashtextextended(lock_key, 0));
+
+  select *
+  into existing_settlement
+  from public.settlements
+  where trip_id = trip_id_input
+    and from_member_id = from_member_id_input
+    and to_member_id = to_member_id_input
+    and amount = normalized_amount
+    and currency = current_trip.base_currency
+    and status = 'paid'
+    and created_at >= now() - interval '2 minutes'
+  order by created_at desc
+  limit 1;
+
+  if existing_settlement.id is not null then
+    return public.load_auth_workspace(caller_member.id);
+  end if;
+
+  insert into public.settlements (
+    trip_id,
+    from_member_id,
+    to_member_id,
+    amount,
+    currency,
+    status,
+    created_by_member_id,
+    paid_confirmed_by_member_id,
+    paid_at
+  )
+  values (
+    trip_id_input,
+    from_member_id_input,
+    to_member_id_input,
+    normalized_amount,
+    current_trip.base_currency,
+    'paid',
+    caller_member.id,
+    caller_member.id,
+    now()
+  );
+
+  return public.load_auth_workspace(caller_member.id);
+end;
+$$;
+
 grant execute on function public.create_trip_with_admin(text, public.currency_code, text) to anon, authenticated;
 grant execute on function public.request_join_by_invite(text, text) to anon, authenticated;
 grant execute on function public.load_member_session(text) to anon, authenticated;
@@ -1290,6 +1494,7 @@ grant execute on function public.approve_member(text, uuid) to anon, authenticat
 grant execute on function public.reject_member(text, uuid) to anon, authenticated;
 grant execute on function public.remove_member(text, uuid) to anon, authenticated;
 grant execute on function public.load_auth_workspace(uuid) to authenticated;
+grant execute on function public.list_my_workspaces() to authenticated;
 grant execute on function public.claim_legacy_member(text) to authenticated;
 grant execute on function public.approve_member(uuid) to authenticated;
 grant execute on function public.reject_member(uuid) to authenticated;
@@ -1299,3 +1504,4 @@ grant execute on function public.update_member_display_currency(uuid, text) to a
 grant execute on function public.create_expense_with_splits(uuid, text, numeric, public.currency_code, numeric, numeric, uuid, date, text, jsonb) to authenticated;
 grant execute on function public.update_expense_with_splits(uuid, text, numeric, public.currency_code, numeric, numeric, uuid, date, text, jsonb) to authenticated;
 grant execute on function public.delete_expense(uuid) to authenticated;
+grant execute on function public.mark_settlement_paid(uuid, uuid, uuid, numeric) to authenticated;

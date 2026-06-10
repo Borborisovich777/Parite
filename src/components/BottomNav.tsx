@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, Receipt, Scale, Users } from 'lucide-react';
+import { Receipt, Scale, Users } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'expenses' | 'balances' | 'members';
+export type TabType = 'expenses' | 'balances' | 'members';
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -17,7 +17,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   showAdminBadge,
 }) => {
   const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: Home },
     { id: 'expenses', label: 'Expenses', icon: Receipt },
     { id: 'balances', label: 'Balances', icon: Scale },
     { id: 'members', label: 'Members', icon: Users, badge: showAdminBadge ? pendingRequestsCount : 0 },

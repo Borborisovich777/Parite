@@ -67,6 +67,7 @@ export interface Settlement {
   currency: Currency; // usually matching trip base currency
   status: 'pending' | 'paid';
   created_by_member_id?: string;
+  paid_confirmed_by_member_id?: string;
   created_at: string;
   paid_at?: string;
 }

@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { BottomNav, TabType } from './components/BottomNav';
-import { DashboardTab } from './components/DashboardTab';
 import { ExpensesTab } from './components/ExpensesTab';
 import { BalancesTab } from './components/BalancesTab';
 import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
-import { Currency, Settlement } from './types';
+import { Currency } from './types';
 import { User } from '@supabase/supabase-js';
 import {
   isSupabaseConfigured,
@@ -22,7 +21,9 @@ import {
   createExpenseWithSplits,
   createTripWithAdmin,
   deleteExpense,
+  listMyWorkspaces,
   loadAuthWorkspace,
+  markSettlementPaid,
   PhaseOneWorkspace,
   rejectMember,
   removeMember,
@@ -30,6 +31,7 @@ import {
   updateExchangeRate,
   updateExpenseWithSplits,
   updateMemberDisplayCurrency,
+  WorkspaceSummary,
 } from './lib/tripRepository';
 import {
   AlertOctagon,
@@ -42,11 +44,13 @@ import {
 } from 'lucide-react';
 
 const MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
-const ACTIVE_MEMBER_ID_KEY = 'tripbalance_active_member_id';
+const LEGACY_ACTIVE_MEMBER_ID_KEY = 'tripbalance_active_member_id';
+const ACTIVE_MEMBER_ID_KEY = 'parite_active_member_id';
 
 export default function App() {
   const [workspace, setWorkspace] = useState<PhaseOneWorkspace | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('expenses');
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isExchangeRatesOpen, setIsExchangeRatesOpen] = useState(false);
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -62,6 +66,7 @@ export default function App() {
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const [isCreatingTripView, setIsCreatingTripView] = useState(false);
+  const [isJoiningTripView, setIsJoiningTripView] = useState(false);
   const [newTripName, setNewTripName] = useState('');
   const [newTripAdminName, setNewTripAdminName] = useState('');
   const [newTripBaseCurrency, setNewTripBaseCurrency] = useState<Currency>('CNY');
@@ -69,8 +74,7 @@ export default function App() {
 
   const [selectedExpenseIdForDetail, setSelectedExpenseIdForDetail] = useState<string | null>(null);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
-  const [localSettlementTripId, setLocalSettlementTripId] = useState<string | null>(null);
-  const [localSettlements, setLocalSettlements] = useState<Settlement[]>([]);
+  const [lastRenderedTripId, setLastRenderedTripId] = useState<string | null>(null);
 
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
@@ -82,25 +86,39 @@ export default function App() {
   const tripMembers = workspace?.members ?? [];
   const tripExpenses = workspace?.expenses ?? [];
   const tripSplits = workspace?.splits ?? [];
+  const tripSettlements = workspace?.settlements ?? [];
   const tripExchangeRates = workspace?.exchangeRates ?? [];
   const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
 
   useEffect(() => {
     const nextTripId = activeTrip?.id ?? null;
-    if (nextTripId === localSettlementTripId) return;
+    if (nextTripId === lastRenderedTripId) return;
 
-    const previousTripId = localSettlementTripId;
-    setLocalSettlementTripId(nextTripId);
-    setLocalSettlements([]);
+    const previousTripId = lastRenderedTripId;
+    setLastRenderedTripId(nextTripId);
 
     if (previousTripId !== null && nextTripId !== previousTripId) {
       setSelectedExpenseIdForDetail(null);
       setIsAddingExpense(false);
     }
-  }, [activeTrip?.id, localSettlementTripId]);
+  }, [activeTrip?.id, lastRenderedTripId]);
 
   const clearAccessToken = () => {
     localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+  };
+
+  const getActiveMemberId = () => {
+    const activeMemberId = localStorage.getItem(ACTIVE_MEMBER_ID_KEY);
+    if (activeMemberId) return activeMemberId;
+
+    const legacyMemberId = localStorage.getItem(LEGACY_ACTIVE_MEMBER_ID_KEY);
+    if (legacyMemberId) {
+      localStorage.setItem(ACTIVE_MEMBER_ID_KEY, legacyMemberId);
+      localStorage.removeItem(LEGACY_ACTIVE_MEMBER_ID_KEY);
+      return legacyMemberId;
+    }
+
+    return null;
   };
 
   const saveActiveMemberId = (memberId: string | undefined) => {
@@ -111,6 +129,7 @@ export default function App() {
 
   const clearActiveMemberId = () => {
     localStorage.removeItem(ACTIVE_MEMBER_ID_KEY);
+    localStorage.removeItem(LEGACY_ACTIVE_MEMBER_ID_KEY);
   };
 
   const applyWorkspace = (nextWorkspace: PhaseOneWorkspace) => {
@@ -119,8 +138,24 @@ export default function App() {
     setAppError(null);
   };
 
+  const refreshWorkspaces = useCallback(async (): Promise<WorkspaceSummary[]> => {
+    setIsWorkspaceLoading(true);
+    try {
+      const nextWorkspaces = await listMyWorkspaces();
+      setWorkspaces(nextWorkspaces);
+      return nextWorkspaces;
+    } catch (error) {
+      console.error(error);
+      setWorkspaces([]);
+      setAppError(error instanceof Error ? error.message : 'Could not load your trips.');
+      return [];
+    } finally {
+      setIsWorkspaceLoading(false);
+    }
+  }, []);
+
   const loadAuthenticatedWorkspace = useCallback(async (
-    memberIdOverride?: string | null,
+    memberId: string,
     options: { setLoading?: boolean } = {}
   ): Promise<PhaseOneWorkspace | null> => {
     if (options.setLoading) {
@@ -128,13 +163,19 @@ export default function App() {
     }
 
     try {
-      const memberId = memberIdOverride ?? localStorage.getItem(ACTIVE_MEMBER_ID_KEY);
       const nextWorkspace = await loadAuthWorkspace(memberId);
+      if (!nextWorkspace.currentMember) {
+        clearActiveMemberId();
+        setWorkspace(null);
+        setAppError(null);
+        return null;
+      }
       applyWorkspace(nextWorkspace);
       return nextWorkspace;
     } catch (error) {
       console.error(error);
       setWorkspace(null);
+      clearActiveMemberId();
       setAppError(error instanceof Error ? error.message : 'Could not load your trip access.');
       return null;
     } finally {
@@ -168,6 +209,7 @@ export default function App() {
     if (inviteParam) {
       setInviteInput(inviteParam.toUpperCase());
       setIsCreatingTripView(false);
+      setIsJoiningTripView(true);
     }
   }, []);
 
@@ -222,6 +264,7 @@ export default function App() {
 
     if (!authUser) {
       setWorkspace(null);
+      setWorkspaces([]);
       clearActiveMemberId();
       return;
     }
@@ -230,8 +273,18 @@ export default function App() {
 
     async function restoreAccountWorkspace() {
       const claimedWorkspace = await claimLegacyAccessIfPresent();
-      if (cancelled || claimedWorkspace) return;
-      await loadAuthenticatedWorkspace(null, { setLoading: true });
+      if (cancelled) return;
+      await refreshWorkspaces();
+      if (claimedWorkspace) return;
+
+      const activeMemberId = getActiveMemberId();
+      if (!activeMemberId) {
+        setWorkspace(null);
+        setAppError(null);
+        return;
+      }
+
+      await loadAuthenticatedWorkspace(activeMemberId, { setLoading: true });
     }
 
     restoreAccountWorkspace();
@@ -239,7 +292,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [authUser, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace]);
+  }, [authUser, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace, refreshWorkspaces]);
 
   const handleAuthSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -283,9 +336,10 @@ export default function App() {
       await signOut();
       setAuthUser(null);
       setWorkspace(null);
+      setWorkspaces([]);
       setIsSideMenuOpen(false);
       clearActiveMemberId();
-      setActiveTab('dashboard');
+      setActiveTab('expenses');
     } catch (error) {
       console.error(error);
       setActionError(error instanceof Error ? error.message : 'Could not log out.');
@@ -314,10 +368,12 @@ export default function App() {
       );
 
       applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
       setNewTripName('');
       setNewTripAdminName('');
       setIsCreatingTripView(false);
-      setActiveTab('dashboard');
+      setIsJoiningTripView(false);
+      setActiveTab('expenses');
     } catch (error) {
       console.error(error);
       setCreateTripError(error instanceof Error ? error.message : 'Could not create trip.');
@@ -341,8 +397,11 @@ export default function App() {
     try {
       const nextWorkspace = await requestJoinByInvite(inviteInput.trim(), displayNameInput.trim());
       applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
       setDisplayNameInput('');
-      setActiveTab('dashboard');
+      setIsJoiningTripView(false);
+      setIsCreatingTripView(false);
+      setActiveTab('expenses');
     } catch (error) {
       console.error(error);
       setJoinError(error instanceof Error ? error.message : 'Could not request access.');
@@ -350,10 +409,15 @@ export default function App() {
   };
 
   const runAdminAction = async (action: () => Promise<void>) => {
+    if (!currentMember) {
+      throw new Error('Trip member is not loaded.');
+    }
+
     setActionError(null);
     try {
       await action();
-      await loadAuthenticatedWorkspace(currentMember?.id ?? null, { setLoading: true });
+      await loadAuthenticatedWorkspace(currentMember.id, { setLoading: true });
+      await refreshWorkspaces();
     } catch (error) {
       console.error(error);
       setActionError(error instanceof Error ? error.message : 'Action failed.');
@@ -394,6 +458,7 @@ export default function App() {
 
     const nextWorkspace = await updateMemberDisplayCurrency(currentMember.id, displayCurrency);
     applyWorkspace(nextWorkspace);
+    await refreshWorkspaces();
     setActionError(null);
   };
 
@@ -417,11 +482,6 @@ export default function App() {
       console.error(error);
       setActionError(error instanceof Error ? error.message : 'Expense saved, but default exchange rate was not updated.');
     }
-  };
-
-  const createLocalId = (prefix: string) => {
-    const randomId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-    return `${prefix}_${randomId}`;
   };
 
   const handleCreateExpense = async (
@@ -513,44 +573,86 @@ export default function App() {
   const handleMarkSettlementPaid = async (
     fromMemberId: string,
     toMemberId: string,
-    amount: number,
-    currency: Currency
+    amount: number
   ) => {
     if (!activeTrip || !currentMember) {
       throw new Error('Trip access is not loaded.');
     }
 
-    const now = new Date().toISOString();
-    setLocalSettlements(prev => [
-      {
-        id: createLocalId('settlement'),
-        trip_id: activeTrip.id,
-        from_member_id: fromMemberId,
-        to_member_id: toMemberId,
-        amount,
-        currency,
-        status: 'paid',
-        created_by_member_id: currentMember.id,
-        created_at: now,
-        paid_at: now,
-      },
-      ...prev,
-    ]);
-
-    setActionError(null);
+    try {
+      const nextWorkspace = await markSettlementPaid(
+        activeTrip.id,
+        fromMemberId,
+        toMemberId,
+        amount
+      );
+      applyWorkspace(nextWorkspace);
+      setActionError(null);
+    } catch (error) {
+      console.error(error);
+      setActionError(error instanceof Error ? error.message : 'Could not mark settlement as paid.');
+      throw error;
+    }
   };
 
-  const handleLeaveTrip = () => {
+  const handleSwitchWorkspace = async (memberId: string) => {
+    setActionError(null);
+    setIsWorkspaceLoading(true);
+    try {
+      const nextWorkspace = await loadAuthWorkspace(memberId);
+      if (!nextWorkspace.currentMember) {
+        throw new Error('Could not load that trip.');
+      }
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+      setIsSideMenuOpen(false);
+      setIsCreatingTripView(false);
+      setIsJoiningTripView(false);
+      setSelectedExpenseIdForDetail(null);
+      setIsAddingExpense(false);
+      setIsExchangeRatesOpen(false);
+      setActiveTab('expenses');
+    } catch (error) {
+      console.error(error);
+      clearActiveMemberId();
+      setWorkspace(null);
+      setActionError(error instanceof Error ? error.message : 'Could not switch trips.');
+    } finally {
+      setIsWorkspaceLoading(false);
+    }
+  };
+
+  const handleShowTripSelection = () => {
     clearActiveMemberId();
     setWorkspace(null);
     setIsCreatingTripView(false);
+    setIsJoiningTripView(false);
     setIsSideMenuOpen(false);
     setIsExchangeRatesOpen(false);
     setSelectedExpenseIdForDetail(null);
     setIsAddingExpense(false);
-    setLocalSettlementTripId(null);
-    setLocalSettlements([]);
-    setActiveTab('dashboard');
+    setActiveTab('expenses');
+    setActionError(null);
+    setAppError(null);
+    refreshWorkspaces();
+  };
+
+  const handleStartCreateTrip = () => {
+    clearActiveMemberId();
+    setWorkspace(null);
+    setIsCreatingTripView(true);
+    setIsJoiningTripView(false);
+    setIsSideMenuOpen(false);
+    setActiveTab('expenses');
+  };
+
+  const handleStartJoinTrip = () => {
+    clearActiveMemberId();
+    setWorkspace(null);
+    setIsCreatingTripView(false);
+    setIsJoiningTripView(true);
+    setIsSideMenuOpen(false);
+    setActiveTab('expenses');
   };
 
   const renderCenteredMessage = (title: string, message: string) => (
@@ -678,6 +780,103 @@ export default function App() {
     </div>
   ) : null;
 
+  const renderWorkspaceSelection = () => (
+    <div className="px-5 py-8 flex flex-col gap-6 flex-1 animate-fade-in bg-[#121418] overflow-y-auto no-scrollbar">
+      <div className="text-center">
+        <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-md mb-3.5 accent-glow">
+          <Compass className="w-8 h-8 text-white stroke-[2.5]" />
+        </div>
+        <h1 className="text-3xl font-extrabold font-display text-white tracking-tight leading-none">
+          Parité
+        </h1>
+        <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
+          Select a trip or start a new shared workspace.
+        </p>
+      </div>
+
+      {renderAccountStrip()}
+
+      {actionError && (
+        <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug">
+          <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{actionError}</span>
+        </div>
+      )}
+
+      <section className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
+        <div className="border-b border-slate-800 pb-2.5">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Select a trip
+          </h2>
+        </div>
+
+        {isWorkspaceLoading && (
+          <p className="text-xs text-slate-500">Loading trips...</p>
+        )}
+
+        {!isWorkspaceLoading && workspaces.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-800 bg-[#121418] px-4 py-8 text-center">
+            <p className="text-sm font-bold text-slate-200">No trips yet.</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Create a trip or join one with an invite code.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {workspaces.map(item => (
+              <button
+                type="button"
+                key={item.member_id}
+                onClick={() => handleSwitchWorkspace(item.member_id)}
+                className="w-full rounded-2xl bg-[#121418] border border-slate-800 hover:border-indigo-500/35 px-4 py-3 text-left cursor-pointer"
+              >
+                <span className="flex items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="text-sm font-bold text-slate-100 truncate block">
+                      {item.trip_name}
+                    </span>
+                    <span className="text-[11px] text-slate-500 truncate block mt-1">
+                      {item.display_name} - {item.role}
+                    </span>
+                  </span>
+                  <span className="text-right shrink-0">
+                    <span className="text-[10px] font-mono font-bold text-indigo-300 block">
+                      {item.base_currency}
+                    </span>
+                    <span className="text-[9px] uppercase text-slate-500 mt-1 block">
+                      {item.status}
+                    </span>
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          id="btn-select-create-trip"
+          onClick={handleStartCreateTrip}
+          className="min-h-12 rounded-2xl bg-indigo-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          Create trip
+        </button>
+        <button
+          type="button"
+          id="btn-select-join-trip"
+          onClick={handleStartJoinTrip}
+          className="min-h-12 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+        >
+          <UserPlus className="w-4 h-4" />
+          Join trip
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:py-6 items-center select-none font-sans overflow-hidden">
       <div className="tripbalance-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
@@ -704,8 +903,13 @@ export default function App() {
               trip={activeTrip}
               currentMember={currentMember}
               accountEmail={authUser?.email ?? null}
+              workspaces={workspaces}
+              currentMemberId={currentMember?.id ?? null}
               onClose={() => setIsSideMenuOpen(false)}
-              onLeaveTrip={handleLeaveTrip}
+              onSwitchWorkspace={handleSwitchWorkspace}
+              onShowTripSelection={handleShowTripSelection}
+              onCreateTrip={handleStartCreateTrip}
+              onJoinTrip={handleStartJoinTrip}
               onAdminTools={() => setActiveTab('members')}
               onExchangeRates={() => setIsExchangeRatesOpen(true)}
               onUpdateDisplayCurrency={handleUpdateDisplayCurrency}
@@ -744,17 +948,30 @@ export default function App() {
 
           {isSupabaseConfigured && !isBootstrapping && !authUser && renderAuthScreen()}
 
-          {isSupabaseConfigured && !isBootstrapping && authUser && !activeTrip && !currentMember && !isCreatingTripView && (
-            <div className="px-5 py-8 flex flex-col gap-8 flex-1 justify-center animate-fade-in bg-[#121418]">
+          {isSupabaseConfigured && !isBootstrapping && authUser && !activeTrip && !currentMember && !isCreatingTripView && !isJoiningTripView && renderWorkspaceSelection()}
+
+          {isSupabaseConfigured && !isBootstrapping && authUser && isJoiningTripView && !activeTrip && !currentMember && (
+            <div className="px-5 py-8 flex flex-col gap-6 flex-1 justify-center animate-fade-in bg-[#121418]">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsJoiningTripView(false)}
+                  className="p-1 px-2.5 bg-slate-800 border border-slate-700/80 rounded-xl text-xs text-slate-300 font-semibold flex items-center hover:bg-slate-750 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 mr-0.5" />
+                  <span>Back</span>
+                </button>
+              </div>
+
               <div className="text-center">
                 <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-md mb-3.5 accent-glow">
                   <Compass className="w-8 h-8 text-white stroke-[2.5]" />
                 </div>
-                <h1 className="text-3xl font-extrabold font-display text-white tracking-tight leading-none uppercase">
-                  TripBalance
+                <h1 className="text-2xl font-bold font-display text-white tracking-tight">
+                  Join trip
                 </h1>
                 <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
-                  Private shared trip access with invite codes and admin approval.
+                  Enter an invite code and your trip display name.
                 </p>
               </div>
 
@@ -816,17 +1033,6 @@ export default function App() {
                 </button>
               </form>
 
-              <div className="text-center flex flex-col gap-3.5 mt-2">
-                <span className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">OR</span>
-                <button
-                  id="btn-goto-create-trip"
-                  onClick={() => setIsCreatingTripView(true)}
-                  className="bg-transparent hover:bg-slate-800/10 text-indigo-400 border border-indigo-500/20 border-dashed py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-4.5 h-4.5" />
-                  <span>Create Brand New Trip</span>
-                </button>
-              </div>
             </div>
           )}
 
@@ -935,11 +1141,12 @@ export default function App() {
               </div>
               {renderAccountStrip()}
               <button
+                type="button"
                 id="btn-pending-back-landing"
-                onClick={handleLeaveTrip}
+                onClick={handleShowTripSelection}
                 className="w-full max-w-xs bg-[#1a1d23] hover:bg-[#20242b] text-slate-300 font-bold border border-slate-800 py-3 rounded-xl text-xs cursor-pointer"
               >
-                Leave trip
+                Switch trip
               </button>
             </div>
           )}
@@ -957,11 +1164,12 @@ export default function App() {
               </div>
               {renderAccountStrip()}
               <button
+                type="button"
                 id="btn-rejected-leave-trip"
-                onClick={handleLeaveTrip}
+                onClick={handleShowTripSelection}
                 className="w-full max-w-xs bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold py-3 rounded-xl text-xs cursor-pointer"
               >
-                Exit Workspace
+                Switch trip
               </button>
             </div>
           )}
@@ -979,11 +1187,12 @@ export default function App() {
               </div>
               {renderAccountStrip()}
               <button
+                type="button"
                 id="btn-removed-leave-trip"
-                onClick={handleLeaveTrip}
+                onClick={handleShowTripSelection}
                 className="w-full max-w-xs bg-[#1a1d23] hover:bg-[#20242b] border border-slate-800 text-slate-200 font-bold py-3 rounded-xl text-xs cursor-pointer"
               >
-                Exit Workspace
+                Switch trip
               </button>
             </div>
           )}
@@ -1002,27 +1211,6 @@ export default function App() {
               )}
 
               <div className="flex-1 overflow-y-auto">
-                {activeTab === 'dashboard' && (
-                  <DashboardTab
-                    trip={activeTrip}
-                    currentMember={currentMember}
-                    expenses={tripExpenses}
-                    splits={tripSplits}
-                    exchangeRates={tripExchangeRates}
-                    members={tripMembers}
-                    onAddExpenseClick={() => {
-                      setIsAddingExpense(true);
-                      setActiveTab('expenses');
-                    }}
-                    onViewExpense={(id) => {
-                      setSelectedExpenseIdForDetail(id);
-                      setIsAddingExpense(false);
-                      setActiveTab('expenses');
-                    }}
-                    onChangeTab={(tab) => setActiveTab(tab)}
-                  />
-                )}
-
                 {activeTab === 'expenses' && (
                   <ExpensesTab
                     trip={activeTrip}
@@ -1049,7 +1237,7 @@ export default function App() {
                     splits={tripSplits}
                     exchangeRates={tripExchangeRates}
                     members={tripMembers}
-                    settlements={localSettlements}
+                    settlements={tripSettlements}
                     onMarkSettlementPaid={handleMarkSettlementPaid}
                   />
                 )}
