@@ -37,6 +37,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
     settlement.status === 'paid' || settlement.status === 'voided'
   );
   const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
+  const isTripClosed = (trip.status ?? 'active') === 'closed';
 
   return (
     <div className="flex flex-col gap-4 pb-24 animate-fade-in px-4 pt-4">
@@ -168,7 +169,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
             recommendations.map((recommendation, index) => {
               const isAdmin = currentMember.role === 'admin';
               const isReceiver = currentMember.id === recommendation.to_member_id;
-              const canConfirmSettlement = isAdmin || isReceiver;
+              const canConfirmSettlement = !isTripClosed && (isAdmin || isReceiver);
               const confirmLabel = isReceiver && !isAdmin ? 'Confirm received' : 'Mark as paid';
               const settlementKey = `${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`;
               const recommendationDisplay = formatDisplayMoney(
@@ -267,7 +268,8 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                 const fromMember = members.find(member => member.id === settlement.from_member_id);
                 const toMember = members.find(member => member.id === settlement.to_member_id);
                 const isVoided = settlement.status === 'voided';
-                const canVoidSettlement = settlement.status === 'paid'
+                const canVoidSettlement = !isTripClosed
+                  && settlement.status === 'paid'
                   && (currentMember.role === 'admin' || currentMember.id === settlement.to_member_id);
                 const settlementDisplay = formatDisplayMoney(
                   settlement.amount,
@@ -336,7 +338,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                           }
                         }}
                         disabled={busySettlementKey === `void-${settlement.id}`}
-                        className="min-h-10 rounded-2xl border border-rose-900/40 bg-rose-950/30 text-rose-200 disabled:opacity-60 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        className="min-h-10 rounded-2xl bg-[var(--color-negative)] text-slate-950 disabled:opacity-60 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <RotateCcw className="w-4 h-4" />
                         {busySettlementKey === `void-${settlement.id}` ? 'Voiding...' : 'Void settlement'}

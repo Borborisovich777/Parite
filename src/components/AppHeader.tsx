@@ -13,9 +13,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   currentMember,
   onMenuOpen,
 }) => {
-  const statusLabel = currentMember?.status === 'approved'
-    ? `Base ${trip.base_currency}`
-    : currentMember?.status ?? trip.base_currency;
+  const tripStatus = trip.status ?? 'active';
+  const statusLabel = tripStatus !== 'active'
+    ? tripStatus
+    : currentMember?.status === 'approved'
+      ? `Base ${trip.base_currency}`
+      : currentMember?.status ?? trip.base_currency;
 
   return (
     <header className="app-header-safe sticky top-0 z-40 shrink-0 bg-[#121418]/95 backdrop-blur border-b border-slate-800/70 px-4 pb-3 flex items-center justify-between gap-3">

@@ -6,7 +6,7 @@ import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
-import { Currency } from './types';
+import { Currency, ExpenseFeeInput, ExpenseSplitInput } from './types';
 import { User } from '@supabase/supabase-js';
 import {
   isSupabaseConfigured,
@@ -17,20 +17,28 @@ import {
 } from './lib/supabase';
 import {
   approveMember,
+  approveTripClosure,
+  cancelTripClosure,
   claimLegacyMember,
   createExpenseWithSplits,
   createTripWithAdmin,
   deleteExpense,
+  demoteAdmin,
+  leaveTrip,
   listMyWorkspaces,
   loadAuthWorkspace,
   markSettlementPaid,
+  promoteMemberToAdmin,
   PhaseOneWorkspace,
+  regenerateTripInviteCode,
   rejectMember,
   removeMember,
   requestJoinByInvite,
+  startTripClosure,
   updateExchangeRate,
   updateExpenseWithSplits,
   updateMemberDisplayCurrency,
+  updateTripName,
   voidSettlement,
   WorkspaceSummary,
 } from './lib/tripRepository';
@@ -76,11 +84,25 @@ export default function App() {
   const [selectedExpenseIdForDetail, setSelectedExpenseIdForDetail] = useState<string | null>(null);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [lastRenderedTripId, setLastRenderedTripId] = useState<string | null>(null);
+  const [membersInitialCategory, setMembersInitialCategory] = useState<'approved' | 'requests' | 'removed'>('approved');
 
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const getActionErrorMessage = (error: unknown, fallback: string) => {
+    if (!(error instanceof Error) || !error.message.trim()) return fallback;
+
+    const message = error.message.trim();
+    const looksRaw = /(PGRST|SQLSTATE|violates|constraint|duplicate key|invalid input syntax|relation .* does not exist|function .* does not exist|column .* does not exist)/i.test(message);
+
+    return looksRaw ? fallback : message;
+  };
+
+  const setActionErrorFromUnknown = (error: unknown, fallback: string) => {
+    setActionError(getActionErrorMessage(error, fallback));
+  };
 
   const activeTrip = workspace?.trip ?? null;
   const currentMember = workspace?.currentMember ?? null;
@@ -90,6 +112,8 @@ export default function App() {
   const tripSettlements = workspace?.settlements ?? [];
   const tripExchangeRates = workspace?.exchangeRates ?? [];
   const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
+  const tripStatus = activeTrip?.status ?? 'active';
+  const isTripActive = tripStatus === 'active';
 
   useEffect(() => {
     const nextTripId = activeTrip?.id ?? null;
@@ -343,7 +367,7 @@ export default function App() {
       setActiveTab('expenses');
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Could not log out.');
+      setActionErrorFromUnknown(error, 'Could not log out.');
     }
   };
 
@@ -421,7 +445,7 @@ export default function App() {
       await refreshWorkspaces();
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Action failed.');
+      setActionErrorFromUnknown(error, 'Action failed.');
       throw error;
     }
   };
@@ -438,6 +462,122 @@ export default function App() {
     await runAdminAction(() => removeMember(memberId));
   };
 
+  const handlePromoteMember = async (memberId: string) => {
+    await runAdminAction(() => promoteMemberToAdmin(memberId));
+  };
+
+  const handleDemoteAdmin = async (memberId: string) => {
+    if (!currentMember) {
+      throw new Error('Trip member is not loaded.');
+    }
+
+    setActionError(null);
+    try {
+      const nextWorkspace = await demoteAdmin(memberId);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not remove admin permissions.');
+      throw error;
+    }
+  };
+
+  const handleLeaveTrip = async () => {
+    if (!currentMember) {
+      throw new Error('Trip member is not loaded.');
+    }
+
+    setActionError(null);
+    try {
+      await leaveTrip(currentMember.id);
+      clearActiveMemberId();
+      setWorkspace(null);
+      setIsSideMenuOpen(false);
+      setActiveTab('expenses');
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not leave trip.');
+      throw error;
+    }
+  };
+
+  const handleStartTripClosure = async () => {
+    if (!activeTrip) throw new Error('Trip is not loaded.');
+
+    setActionError(null);
+    try {
+      const nextWorkspace = await startTripClosure(activeTrip.id);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not start close request.');
+      throw error;
+    }
+  };
+
+  const handleApproveTripClosure = async () => {
+    if (!activeTrip) throw new Error('Trip is not loaded.');
+
+    setActionError(null);
+    try {
+      const nextWorkspace = await approveTripClosure(activeTrip.id);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not approve close request.');
+      throw error;
+    }
+  };
+
+  const handleCancelTripClosure = async () => {
+    if (!activeTrip) throw new Error('Trip is not loaded.');
+
+    setActionError(null);
+    try {
+      const nextWorkspace = await cancelTripClosure(activeTrip.id);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not cancel close request.');
+      throw error;
+    }
+  };
+
+  const handleRegenerateTripInviteCode = async () => {
+    if (!activeTrip) throw new Error('Trip is not loaded.');
+
+    setActionError(null);
+    try {
+      const nextWorkspace = await regenerateTripInviteCode(activeTrip.id);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not regenerate invite code.');
+      throw error;
+    }
+  };
+
+  const handleUpdateTripName = async (name: string) => {
+    if (!activeTrip) throw new Error('Trip is not loaded.');
+
+    setActionError(null);
+    try {
+      const nextWorkspace = await updateTripName(activeTrip.id, name);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not rename trip.');
+      throw error;
+    }
+  };
+
   const handleUpdateExchangeRate = async (
     fromCurrency: Currency,
     toCurrency: Currency,
@@ -447,9 +587,15 @@ export default function App() {
       throw new Error('Trip access is not loaded.');
     }
 
-    const nextWorkspace = await updateExchangeRate(activeTrip.id, fromCurrency, toCurrency, rate);
-    applyWorkspace(nextWorkspace);
-    setActionError(null);
+    try {
+      const nextWorkspace = await updateExchangeRate(activeTrip.id, fromCurrency, toCurrency, rate);
+      applyWorkspace(nextWorkspace);
+      setActionError(null);
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not save exchange rate.');
+      throw error;
+    }
   };
 
   const handleUpdateDisplayCurrency = async (displayCurrency: Currency | null) => {
@@ -457,10 +603,16 @@ export default function App() {
       throw new Error('Trip member is not loaded.');
     }
 
-    const nextWorkspace = await updateMemberDisplayCurrency(currentMember.id, displayCurrency);
-    applyWorkspace(nextWorkspace);
-    await refreshWorkspaces();
-    setActionError(null);
+    try {
+      const nextWorkspace = await updateMemberDisplayCurrency(currentMember.id, displayCurrency);
+      applyWorkspace(nextWorkspace);
+      await refreshWorkspaces();
+      setActionError(null);
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not save display currency.');
+      throw error;
+    }
   };
 
   const rememberAdminExchangeRate = async (
@@ -481,7 +633,7 @@ export default function App() {
       applyWorkspace(nextWorkspace);
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Expense saved, but default exchange rate was not updated.');
+      setActionErrorFromUnknown(error, 'Expense saved, but default exchange rate was not updated.');
     }
   };
 
@@ -494,7 +646,8 @@ export default function App() {
     paidByMemberId: string,
     expenseDate: string,
     notes: string,
-    splitsList: { member_id: string; amount_owed: number }[]
+    splitsList: ExpenseSplitInput[],
+    feeInput?: ExpenseFeeInput | null
   ) => {
     if (!activeTrip || !currentMember) {
       throw new Error('Trip access is not loaded.');
@@ -511,14 +664,15 @@ export default function App() {
         paidByMemberId,
         expenseDate,
         notes,
-        splitsList
+        splitsList,
+        feeInput
       );
       applyWorkspace(nextWorkspace);
       setActionError(null);
       await rememberAdminExchangeRate(currency, exchangeRate);
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Could not save expense.');
+      setActionErrorFromUnknown(error, 'Could not save expense.');
       throw error;
     }
   };
@@ -533,7 +687,8 @@ export default function App() {
     paidByMemberId: string,
     expenseDate: string,
     notes: string,
-    splitsList: { member_id: string; amount_owed: number }[]
+    splitsList: ExpenseSplitInput[],
+    feeInput?: ExpenseFeeInput | null
   ) => {
     try {
       const nextWorkspace = await updateExpenseWithSplits(
@@ -546,14 +701,15 @@ export default function App() {
         paidByMemberId,
         expenseDate,
         notes,
-        splitsList
+        splitsList,
+        feeInput
       );
       applyWorkspace(nextWorkspace);
       setActionError(null);
       await rememberAdminExchangeRate(currency, exchangeRate);
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Could not update expense.');
+      setActionErrorFromUnknown(error, 'Could not update expense.');
       throw error;
     }
   };
@@ -566,7 +722,7 @@ export default function App() {
       setActionError(null);
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Could not delete expense.');
+      setActionErrorFromUnknown(error, 'Could not delete expense.');
       throw error;
     }
   };
@@ -591,7 +747,7 @@ export default function App() {
       setActionError(null);
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Could not mark settlement as paid.');
+      setActionErrorFromUnknown(error, 'Could not mark settlement as paid.');
       throw error;
     }
   };
@@ -603,7 +759,7 @@ export default function App() {
       setActionError(null);
     } catch (error) {
       console.error(error);
-      setActionError(error instanceof Error ? error.message : 'Could not void settlement.');
+      setActionErrorFromUnknown(error, 'Could not void settlement.');
       throw error;
     }
   };
@@ -629,7 +785,7 @@ export default function App() {
       console.error(error);
       clearActiveMemberId();
       setWorkspace(null);
-      setActionError(error instanceof Error ? error.message : 'Could not switch trips.');
+      setActionErrorFromUnknown(error, 'Could not switch trips.');
     } finally {
       setIsWorkspaceLoading(false);
     }
@@ -793,6 +949,23 @@ export default function App() {
     </div>
   ) : null;
 
+  const renderActionErrorBanner = (className = '') => actionError ? (
+    <div className={`sticky top-0 z-50 w-full bg-[#e07a5f] border-y border-[#e07a5f] text-[#3d405b] shadow-lg ${className}`}>
+      <div className="px-4 py-3 flex items-start gap-3">
+        <AlertOctagon className="w-5 h-5 shrink-0 mt-0.5 text-[#3d405b]" />
+        <span className="flex-1 text-sm font-bold leading-snug">{actionError}</span>
+        <button
+          type="button"
+          onClick={() => setActionError(null)}
+          className="shrink-0 rounded-lg p-1 text-[#3d405b] hover:bg-[#3d405b]/10 focus:outline-none focus:ring-2 focus:ring-[#3d405b]/30"
+          aria-label="Dismiss error"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   const renderWorkspaceSelection = () => (
     <div className="px-5 py-8 flex flex-col gap-6 flex-1 animate-fade-in bg-[#121418] overflow-y-auto no-scrollbar">
       <div className="text-center">
@@ -809,12 +982,7 @@ export default function App() {
 
       {renderAccountStrip()}
 
-      {actionError && (
-        <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug">
-          <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{actionError}</span>
-        </div>
-      )}
+      {renderActionErrorBanner('-mx-5 w-auto')}
 
       <section className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
         <div className="border-b border-slate-800 pb-2.5">
@@ -857,7 +1025,9 @@ export default function App() {
                       {item.base_currency}
                     </span>
                     <span className="text-[9px] uppercase text-slate-500 mt-1 block">
-                      {item.status}
+                      {item.trip_status && item.trip_status !== 'active'
+                        ? item.trip_status
+                        : item.status}
                     </span>
                   </span>
                 </span>
@@ -923,19 +1093,35 @@ export default function App() {
               onShowTripSelection={handleShowTripSelection}
               onCreateTrip={handleStartCreateTrip}
               onJoinTrip={handleStartJoinTrip}
-              onAdminTools={() => setActiveTab('members')}
+              pendingRequestsCount={tripMembers.filter(member => member.status === 'pending').length}
+              onAdminTools={() => {
+                setMembersInitialCategory('approved');
+                setActiveTab('members');
+              }}
+              onPendingRequests={() => {
+                setMembersInitialCategory('requests');
+                setActiveTab('members');
+              }}
               onExchangeRates={() => setIsExchangeRatesOpen(true)}
+              onRegenerateInviteCode={handleRegenerateTripInviteCode}
+              onUpdateTripName={handleUpdateTripName}
               onUpdateDisplayCurrency={handleUpdateDisplayCurrency}
+              onLeaveTrip={handleLeaveTrip}
+              onStartTripClosure={handleStartTripClosure}
+              onApproveTripClosure={handleApproveTripClosure}
+              onCancelTripClosure={handleCancelTripClosure}
+              onActionError={setActionError}
               onLogout={handleLogout}
             />
             {currentMember?.status === 'approved' && (
               <ExchangeRatesSheet
-                isOpen={isExchangeRatesOpen}
+                isOpen={isExchangeRatesOpen && isTripActive}
                 trip={activeTrip}
                 currentMember={currentMember}
                 exchangeRates={tripExchangeRates}
                 onClose={() => setIsExchangeRatesOpen(false)}
                 onUpdateRate={handleUpdateExchangeRate}
+                onActionError={setActionError}
               />
             )}
           </>
@@ -1217,9 +1403,11 @@ export default function App() {
 
           {activeTrip && currentMember && currentMember.status === 'approved' && (
             <div className="flex-1 flex flex-col bg-[#121418]">
-              {(actionError || isWorkspaceLoading) && (
-                <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400">
-                  {actionError ?? 'Syncing latest trip data...'}
+              {renderActionErrorBanner()}
+
+              {!actionError && isWorkspaceLoading && (
+                <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400 flex items-start gap-2">
+                  <span className="flex-1">Syncing latest trip data...</span>
                 </div>
               )}
 
@@ -1240,6 +1428,8 @@ export default function App() {
                     onSetSelectedExpenseId={setSelectedExpenseIdForDetail}
                     isAddingExpense={isAddingExpense}
                     onSetAddingExpense={setIsAddingExpense}
+                    isReadOnly={!isTripActive}
+                    onActionError={setActionError}
                   />
                 )}
 
@@ -1262,9 +1452,12 @@ export default function App() {
                     trip={activeTrip}
                     currentMember={currentMember}
                     members={tripMembers}
+                    initialCategory={membersInitialCategory}
                     onApproveMember={handleApproveMember}
                     onRejectMember={handleRejectMember}
                     onRemoveMember={handleRemoveMember}
+                    onPromoteMember={handlePromoteMember}
+                    onDemoteAdmin={handleDemoteAdmin}
                   />
                 )}
               </div>

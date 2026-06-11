@@ -1,11 +1,14 @@
 export type Currency = 'AED' | 'CNY' | 'KZT';
+export type TripStatus = 'active' | 'closing' | 'closed';
 
 export interface Trip {
   id: string;
   name: string;
   base_currency: Currency;
   invite_code: string;
+  status?: TripStatus;
   created_at: string;
+  closed_at?: string;
 }
 
 export type MemberRole = 'admin' | 'member';
@@ -29,10 +32,14 @@ export interface Expense {
   id: string;
   trip_id: string;
   title: string;
-  amount: number; // original amount
+  amount: number; // final original amount, including service fee when present
+  subtotal_amount?: number; // original amount before service fee
+  fee_percent?: number;
+  fee_amount?: number; // original-currency fee amount
+  fee_label?: string | null;
   currency: Currency;
   exchange_rate_to_base: number;
-  converted_amount: number; // in base currency
+  converted_amount: number; // final amount in base currency
   paid_by_member_id: string;
   expense_date: string; // YYYY-MM-DD
   notes?: string;
@@ -48,7 +55,22 @@ export interface ExpenseSplit {
   id: string;
   expense_id: string;
   member_id: string;
-  amount_owed: number; // in base currency
+  amount_owed: number; // final owed amount in base currency
+  subtotal_amount_owed?: number; // pre-fee share in base currency
+  fee_amount_owed?: number; // fee share in base currency
+}
+
+export interface ExpenseSplitInput {
+  member_id: string;
+  amount_owed: number;
+  subtotal_amount_owed?: number;
+  fee_amount_owed?: number;
+}
+
+export interface ExpenseFeeInput {
+  subtotal_amount: number;
+  fee_percent: number;
+  fee_label?: string | null;
 }
 
 export interface ExchangeRate {
@@ -93,4 +115,11 @@ export interface SettlementRecommendation {
   to_display_name: string;
   amount: number; // in base currency
   currency: Currency;
+}
+
+export interface TripClosureVote {
+  id: string;
+  trip_id: string;
+  member_id: string;
+  approved_at: string;
 }

@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement, ExpenseFeeInput, ExpenseSplitInput } from '../types';
 import {
   calculateConvertedAmount,
-  calculateEqualSplits,
   calculateOpenMemberBalances,
-  calculateSmartCustomSplits,
+  calculateSmartCustomSplitsWithFee,
 } from '../lib/calculations';
 import { isDecimalInputValue, isMoneyInputValue, parsePositiveDecimal } from '../lib/decimalInput';
 import { formatDisplayMoney, getMemberDisplayCurrency, getTripExchangeRate } from '../lib/exchangeRates';
@@ -41,7 +40,8 @@ interface ExpensesTabProps {
     paidByMemberId: string,
     expenseDate: string,
     notes: string,
-    splitsList: { member_id: string; amount_owed: number }[]
+    splitsList: ExpenseSplitInput[],
+    feeInput?: ExpenseFeeInput | null
   ) => void | Promise<void>;
   onUpdateExpense: (
     expenseId: string,
@@ -53,13 +53,16 @@ interface ExpensesTabProps {
     paidByMemberId: string,
     expenseDate: string,
     notes: string,
-    splitsList: { member_id: string; amount_owed: number }[]
+    splitsList: ExpenseSplitInput[],
+    feeInput?: ExpenseFeeInput | null
   ) => void | Promise<void>;
   onDeleteExpense: (expenseId: string) => void | Promise<void>;
   selectedExpenseIdForDetail: string | null;
   onSetSelectedExpenseId: (id: string | null) => void;
   isAddingExpense: boolean;
   onSetAddingExpense: (val: boolean) => void;
+  isReadOnly?: boolean;
+  onActionError?: (message: string) => void;
 }
 
 type FormStep = 'basic' | 'preview';
@@ -79,6 +82,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   onSetSelectedExpenseId,
   isAddingExpense,
   onSetAddingExpense,
+  isReadOnly = false,
+  onActionError,
 }) => {
   const approvedMembers = members.filter(m => m.status === 'approved');
   const tripBaseCurrency = trip?.base_currency ?? 'CNY';
@@ -96,6 +101,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const [formTitle, setFormTitle] = useState('');
   const [formAmount, setFormAmount] = useState('');
+  const [isServiceFeeEnabled, setIsServiceFeeEnabled] = useState(false);
+  const [feePercentInput, setFeePercentInput] = useState('');
+  const [feeLabelInput, setFeeLabelInput] = useState('Service fee');
   const [formCurrency, setFormCurrency] = useState<Currency>(tripBaseCurrency);
   const [useCustomExchangeRate, setUseCustomExchangeRate] = useState(false);
   const [customExchangeRateInput, setCustomExchangeRateInput] = useState('');
@@ -110,6 +118,20 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const submitSourceRef = useRef<string | null>(null);
+
+  const setBlockingError = (message: string) => {
+    setFormError(message);
+    onActionError?.(message);
+  };
+
+  const getBlockingErrorMessage = (error: unknown, fallback: string) => {
+    if (!(error instanceof Error) || !error.message.trim()) return fallback;
+
+    const message = error.message.trim();
+    const looksRaw = /(PGRST|SQLSTATE|violates|constraint|duplicate key|invalid input syntax|relation .* does not exist|function .* does not exist|column .* does not exist)/i.test(message);
+
+    return looksRaw ? fallback : message;
+  };
 
   const setFormStepWithReason = (nextStep: FormStep, reason: string) => {
     void reason;
@@ -127,8 +149,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     });
   };
 
-  const amountValue = parseFloat(formAmount);
-  const hasValidAmount = Number.isFinite(amountValue) && amountValue > 0;
+  const roundMoney = (value: number) => Math.round(value * 100) / 100;
+  const subtotalValue = parseFloat(formAmount);
+  const hasValidAmount = Number.isFinite(subtotalValue) && subtotalValue > 0;
+  const feePercentValue = isServiceFeeEnabled && feePercentInput.trim() !== ''
+    ? Number(feePercentInput)
+    : 0;
+  const hasValidFeePercent = !isServiceFeeEnabled
+    || (Number.isFinite(feePercentValue) && feePercentValue >= 0 && feePercentValue <= 100);
+  const feeAmountValue = hasValidAmount && hasValidFeePercent && isServiceFeeEnabled
+    ? roundMoney(subtotalValue * feePercentValue / 100)
+    : 0;
+  const amountValue = hasValidAmount ? roundMoney(subtotalValue + feeAmountValue) : Number.NaN;
   const displayAmount = Number.isFinite(amountValue) ? amountValue : 0;
   const isBaseCurrencyExpense = formCurrency === tripBaseCurrency;
   const tripExchangeRate = useMemo(() => {
@@ -145,8 +177,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       : tripExchangeRate;
   const hasValidRate = activeExchangeRate !== null;
   const rateValue = activeExchangeRate ?? Number.NaN;
-  const convertedAmount = hasValidAmount && hasValidRate
+  const convertedSubtotalAmount = hasValidAmount && hasValidRate
+    ? calculateConvertedAmount(subtotalValue, rateValue)
+    : Number.NaN;
+  const convertedAmount = hasValidAmount && hasValidRate && hasValidFeePercent
     ? calculateConvertedAmount(amountValue, rateValue)
+    : Number.NaN;
+  const convertedFeeAmount = Number.isFinite(convertedAmount) && Number.isFinite(convertedSubtotalAmount)
+    ? roundMoney(convertedAmount - convertedSubtotalAmount)
     : Number.NaN;
   const hasValidConvertedAmount = Number.isFinite(convertedAmount);
 
@@ -176,17 +214,24 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       ? 'You are owed'
       : 'You owe';
 
-  const equalPreviewSplits = useMemo(
-    () => hasValidConvertedAmount ? calculateEqualSplits(convertedAmount, formParticipants) : [],
-    [convertedAmount, formParticipants, hasValidConvertedAmount]
-  );
-  const smartCustomSplitResult = useMemo(
-    () => calculateSmartCustomSplits({
-      totalAmount: hasValidConvertedAmount ? convertedAmount : 0,
+  const equalSplitResult = useMemo(
+    () => calculateSmartCustomSplitsWithFee({
+      subtotalBaseAmount: hasValidConvertedAmount && Number.isFinite(convertedSubtotalAmount) ? convertedSubtotalAmount : 0,
+      finalBaseAmount: hasValidConvertedAmount ? convertedAmount : 0,
       participantIds: formParticipants,
-      manualAmounts: formCustomSplits,
+      manualSubtotalAmounts: {},
     }),
-    [convertedAmount, formCustomSplits, formParticipants, hasValidConvertedAmount]
+    [convertedAmount, convertedSubtotalAmount, formParticipants, hasValidConvertedAmount]
+  );
+  const equalPreviewSplits = equalSplitResult.splits;
+  const smartCustomSplitResult = useMemo(
+    () => calculateSmartCustomSplitsWithFee({
+      subtotalBaseAmount: hasValidConvertedAmount && Number.isFinite(convertedSubtotalAmount) ? convertedSubtotalAmount : 0,
+      finalBaseAmount: hasValidConvertedAmount ? convertedAmount : 0,
+      participantIds: formParticipants,
+      manualSubtotalAmounts: formCustomSplits,
+    }),
+    [convertedAmount, convertedSubtotalAmount, formCustomSplits, formParticipants, hasValidConvertedAmount]
   );
 
   const filteredExpenses = expenses.filter(expense => {
@@ -200,6 +245,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       paidByMember?.display_name ?? '',
       expense.amount.toString(),
       expense.amount.toFixed(2),
+      (expense.subtotal_amount ?? '').toString(),
+      (expense.fee_percent ?? '').toString(),
+      expense.fee_label ?? '',
       expense.converted_amount.toString(),
       expense.converted_amount.toFixed(2),
       expense.currency,
@@ -253,9 +301,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const handleOpenAddForm = () => {
+    if (isReadOnly) return;
+
     const activeIds = approvedMembers.map(m => m.id);
     setFormTitle('');
     setFormAmount('');
+    setIsServiceFeeEnabled(false);
+    setFeePercentInput('');
+    setFeeLabelInput('Service fee');
     setFormCurrencyWithReason(tripBaseCurrency, 'open-add-form');
     setUseCustomExchangeRate(false);
     setCustomExchangeRateInput('');
@@ -271,15 +324,29 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const handleOpenEditForm = (expense: Expense) => {
+    if (isReadOnly) return;
+
     const expenseSplits = splits.filter(s => s.expense_id === expense.id);
     const participantIds = expenseSplits.map(s => s.member_id);
-    const equalsResult = calculateEqualSplits(expense.converted_amount, participantIds);
+    const expenseSubtotal = expense.subtotal_amount ?? expense.amount;
+    const expenseFeePercent = expense.fee_percent ?? 0;
+    const hasExpenseFee = expenseFeePercent > 0 || (expense.fee_amount ?? 0) > 0;
+    const expenseConvertedSubtotal = calculateConvertedAmount(expenseSubtotal, expense.exchange_rate_to_base);
+    const equalsResult = calculateSmartCustomSplitsWithFee({
+      subtotalBaseAmount: expenseConvertedSubtotal,
+      finalBaseAmount: expense.converted_amount,
+      participantIds,
+      manualSubtotalAmounts: {},
+    }).splits;
     let isSplitEqual = true;
     const custom: Record<string, string> = {};
 
     approvedMembers.forEach(member => {
       const split = expenseSplits.find(s => s.member_id === member.id);
-      custom[member.id] = split ? split.amount_owed.toString() : '';
+      const splitAmount = hasExpenseFee
+        ? split?.subtotal_amount_owed ?? split?.amount_owed
+        : split?.amount_owed;
+      custom[member.id] = splitAmount !== undefined ? splitAmount.toString() : '';
     });
 
     for (const split of expenseSplits) {
@@ -292,7 +359,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
     setEditingExpense(expense);
     setFormTitle(expense.title);
-    setFormAmount(expense.amount.toString());
+    setFormAmount(expenseSubtotal.toString());
+    setIsServiceFeeEnabled(hasExpenseFee);
+    setFeePercentInput(hasExpenseFee ? expenseFeePercent.toString() : '');
+    setFeeLabelInput(expense.fee_label || 'Service fee');
     setFormCurrencyWithReason(expense.currency, 'open-edit-form');
     if (expense.currency === tripBaseCurrency) {
       setUseCustomExchangeRate(false);
@@ -313,7 +383,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormCustomSplits(custom);
     setFormStepWithReason('basic', 'open-edit-form');
     setShowCustomizeSplit(!isSplitEqual);
-    setShowMoreOptions(expense.currency !== tripBaseCurrency || Boolean(expense.notes));
+    setShowMoreOptions(expense.currency !== tripBaseCurrency || Boolean(expense.notes) || hasExpenseFee);
     setFormError(null);
     onSetAddingExpense(false);
     onSetSelectedExpenseId(null);
@@ -327,7 +397,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
     const amount = parseFloat(formAmount);
     if (Number.isNaN(amount) || amount <= 0) {
-      setFormError('Amount must be greater than zero');
+      setFormError(isServiceFeeEnabled ? 'Subtotal must be greater than zero' : 'Amount must be greater than zero');
+      return false;
+    }
+
+    if (!hasValidFeePercent) {
+      setBlockingError('Service fee must be between 0 and 100 percent');
       return false;
     }
 
@@ -348,10 +423,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     if (!validateBasicFields()) return;
 
     if (formCurrency !== tripBaseCurrency && !hasValidRate) {
-      setFormError(
-        useCustomExchangeRate
-          ? 'Enter a custom exchange rate greater than zero'
-          : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
+      setBlockingError(useCustomExchangeRate
+        ? 'Enter a custom exchange rate greater than zero'
+        : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
       );
       setFormStepWithReason('preview', 'continue-missing-rate');
       return;
@@ -361,23 +435,27 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormStepWithReason('preview', 'continue');
   };
 
-  const buildSplitsList = (): { member_id: string; amount_owed: number }[] | null => {
+  const buildSplitsList = (): ExpenseSplitInput[] | null => {
     if (formParticipants.length === 0) {
-      setFormError('At least one participant must be selected');
+      setBlockingError('At least one participant must be selected');
       return null;
     }
 
     if (!hasValidConvertedAmount) {
-      setFormError('Enter a valid amount and exchange rate first');
+      setBlockingError('Enter a valid amount and exchange rate first');
       return null;
     }
 
     if (formSplitMethod === 'equal') {
-      return calculateEqualSplits(convertedAmount, formParticipants);
+      if (!equalSplitResult.isValid) {
+        setBlockingError(equalSplitResult.error ?? 'Could not calculate equal splits for this total.');
+        return null;
+      }
+      return equalSplitResult.splits;
     }
 
     if (!smartCustomSplitResult.isValid) {
-      setFormError(smartCustomSplitResult.error ?? 'Custom split amounts must match the converted expense total.');
+      setBlockingError(smartCustomSplitResult.error ?? 'Custom split amounts must match the converted expense total.');
       return null;
     }
 
@@ -400,13 +478,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       return;
     }
 
-    const amount = parseFloat(formAmount);
+    const amount = amountValue;
+    const feeInput: ExpenseFeeInput = {
+      subtotal_amount: subtotalValue,
+      fee_percent: isServiceFeeEnabled ? feePercentValue : 0,
+      fee_label: isServiceFeeEnabled ? (feeLabelInput.trim() || 'Service fee') : null,
+    };
     const exchangeRate = activeExchangeRate;
     if (exchangeRate === null || !Number.isFinite(exchangeRate) || exchangeRate <= 0) {
-      setFormError(
-        useCustomExchangeRate
-          ? 'Exchange rate must be greater than zero'
-          : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
+      setBlockingError(useCustomExchangeRate
+        ? 'Exchange rate must be greater than zero'
+        : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
       );
       setFormStepWithReason('preview', 'submit-invalid-rate');
       submitSourceRef.current = null;
@@ -434,7 +516,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
           formPayer,
           formDate,
           formNotes.trim(),
-          splitsList
+          splitsList,
+          feeInput
         );
       } else {
         await onCreateExpense(
@@ -446,14 +529,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
           formPayer,
           formDate,
           formNotes.trim(),
-          splitsList
+          splitsList,
+          feeInput
         );
       }
 
       closeForm();
     } catch (error) {
       console.error(error);
-      setFormError(error instanceof Error ? error.message : 'Could not save this expense');
+      setBlockingError(getBlockingErrorMessage(error, 'Could not save this expense'));
     } finally {
       submitSourceRef.current = null;
       setIsSaving(false);
@@ -469,7 +553,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       onSetSelectedExpenseId(null);
     } catch (error) {
       console.error(error);
-      setFormError(error instanceof Error ? error.message : 'Could not delete this expense');
+      setBlockingError(getBlockingErrorMessage(error, 'Could not delete this expense'));
     } finally {
       setIsSaving(false);
     }
@@ -490,6 +574,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const isFormOpen = isAddingExpense || Boolean(editingExpense);
+  const readOnlyMessage = (trip.status ?? 'active') === 'closed'
+    ? 'This trip is closed and read-only. Expenses can still be viewed, but they cannot be added, edited, or deleted.'
+    : 'This trip is being closed. Cancel the close request before changing expenses.';
   const payerName = approvedMembers.find(member => member.id === formPayer)?.display_name ?? 'Unknown';
   const participantSummary = formParticipants.length === approvedMembers.length
     ? 'Everyone'
@@ -542,7 +629,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
           <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-5">
             {formError && (
-              <div className="mb-4 bg-rose-950/45 border border-rose-800/70 text-rose-200 p-3 rounded-2xl text-xs flex gap-2 items-start">
+              <div className="mb-4 bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{formError}</span>
               </div>
@@ -552,7 +639,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               <div className="flex flex-col gap-5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-2">
-                    Amount
+                    {isServiceFeeEnabled ? 'Subtotal before fee' : 'Amount'}
                   </label>
                   <input
                     type="number"
@@ -566,6 +653,94 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     className="w-full bg-[#1a1d23] border border-slate-800 rounded-2xl px-4 py-4 font-mono text-3xl font-bold text-white placeholder-slate-700 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
+
+                <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-100">Service fee</h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Optional percentage added to this expense.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsServiceFeeEnabled(prev => {
+                          const next = !prev;
+                          if (!next) {
+                            setFeePercentInput('');
+                            setFeeLabelInput('Service fee');
+                            initializeCustomSplits(formParticipants);
+                          }
+                          return next;
+                        });
+                      }}
+                      className={`min-h-10 rounded-xl px-3 text-xs font-bold cursor-pointer ${
+                        isServiceFeeEnabled
+                          ? 'bg-[var(--color-positive)] text-slate-950'
+                          : 'bg-[#121418] border border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      {isServiceFeeEnabled ? 'Remove fee' : 'Add service fee'}
+                    </button>
+                  </div>
+
+                  {isServiceFeeEnabled && (
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-[1fr_110px] gap-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-2">
+                            Fee label
+                          </label>
+                          <input
+                            type="text"
+                            value={feeLabelInput}
+                            onChange={event => setFeeLabelInput(event.target.value)}
+                            placeholder="Service fee"
+                            className="w-full min-h-11 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-2">
+                            Fee %
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={feePercentInput}
+                            onChange={event => {
+                              const nextValue = event.target.value;
+                              if (isDecimalInputValue(nextValue)) {
+                                setFeePercentInput(nextValue);
+                              }
+                            }}
+                            placeholder="10"
+                            className="w-full min-h-11 bg-[#121418] border border-slate-800 rounded-2xl px-3 py-2.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className={`rounded-2xl border px-3 py-2 text-xs ${
+                        hasValidFeePercent
+                          ? 'bg-[#121418] border-slate-800 text-slate-400'
+                          : 'bg-[#e07a5f] border-[#e07a5f] text-[#3d405b] font-bold'
+                      }`}>
+                        {hasValidFeePercent ? (
+                          <>
+                            <p>
+                              Fee: <span className="font-mono text-slate-100">{feeAmountValue.toFixed(2)} {formCurrency}</span>
+                            </p>
+                            <p className="mt-1">
+                              Total: <span className="font-mono text-slate-100">{hasValidAmount ? amountValue.toFixed(2) : '0.00'} {formCurrency}</span>
+                            </p>
+                          </>
+                        ) : (
+                          <p>Service fee must be between 0 and 100 percent.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
 
                 <div className="grid grid-cols-[1fr_120px] gap-3">
                   <div>
@@ -635,6 +810,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <p className="font-mono text-lg font-bold text-white">
                         {displayAmount.toFixed(2)} {formCurrency}
                       </p>
+                      {isServiceFeeEnabled && (
+                        <p className="text-[10px] text-slate-500 font-mono mt-1">
+                          {hasValidAmount ? subtotalValue.toFixed(2) : '--'} + {feeAmountValue.toFixed(2)}
+                        </p>
+                      )}
                       {formCurrency !== tripBaseCurrency && (
                         <>
                           <p className="text-[10px] text-indigo-300 font-mono mt-1">
@@ -668,6 +848,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   </div>
 
                   <div className="mt-3 rounded-2xl bg-[#121418] border border-slate-800 p-3">
+                    {isServiceFeeEnabled && (
+                      <div className="mb-3 border-b border-slate-800 pb-3 text-[11px] text-slate-400">
+                        <p className="font-mono">
+                          Subtotal: <span className="text-slate-100">{hasValidAmount ? subtotalValue.toFixed(2) : '--'} {formCurrency}</span>
+                        </p>
+                        <p className="font-mono mt-1">
+                          {(feeLabelInput.trim() || 'Service fee')} {feePercentValue || 0}%:{' '}
+                          <span className="text-slate-100">{feeAmountValue.toFixed(2)} {formCurrency}</span>
+                        </p>
+                        <p className="font-mono mt-1">
+                          Total: <span className="text-slate-100">{hasValidAmount ? amountValue.toFixed(2) : '--'} {formCurrency}</span>
+                        </p>
+                        {hasValidConvertedAmount && (
+                          <>
+                            <p className="font-mono mt-1 text-slate-500">
+                              Converted subtotal: {convertedSubtotalAmount.toFixed(2)} {tripBaseCurrency}
+                            </p>
+                            <p className="font-mono mt-1 text-slate-500">
+                              Converted fee: {convertedFeeAmount.toFixed(2)} {tripBaseCurrency}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    )}
                     <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
                       Rate used
                     </p>
@@ -709,7 +913,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             const member = approvedMembers.find(m => m.id === item.member_id);
                             return (
                               <div key={item.member_id} className="flex items-center justify-between text-xs text-slate-400">
-                                <span>{member?.display_name ?? 'Participant'}</span>
+                                <span>
+                                  {member?.display_name ?? 'Participant'}
+                                  {isServiceFeeEnabled && (
+                                    <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                                      {item.subtotal_amount_owed?.toFixed(2) ?? '--'} + {item.fee_amount_owed?.toFixed(2) ?? '--'}
+                                    </span>
+                                  )}
+                                </span>
                                 <span className="font-mono font-bold text-slate-100">
                                   {item.amount_owed.toFixed(2)} {tripBaseCurrency}
                                 </span>
@@ -730,6 +941,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                                 <span className="ml-1 text-[9px] uppercase">
                                   {splitRow?.mode ?? 'auto'}
                                 </span>
+                                {isServiceFeeEnabled && splitRow && (
+                                  <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                                    {splitRow.subtotal_amount_owed?.toFixed(2) ?? '--'} + {splitRow.fee_amount_owed?.toFixed(2) ?? '--'}
+                                  </span>
+                                )}
                               </span>
                               <span className="font-mono font-bold text-slate-100">
                                 {splitRow ? splitRow.amount_owed.toFixed(2) : '--'} {tripBaseCurrency}
@@ -856,7 +1072,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <div>
                         <h3 className="text-sm font-bold text-white">Customize split</h3>
                         <p className="text-[11px] text-slate-500 mt-0.5">
-                          Split amounts are in {tripBaseCurrency}. Personal display currency is only a preview.
+                          {isServiceFeeEnabled
+                            ? `Enter pre-fee shares in ${tripBaseCurrency}. Parité adds the service fee automatically.`
+                            : `Split amounts are in ${tripBaseCurrency}. Personal display currency is only a preview.`}
                         </p>
                       </div>
                       <button
@@ -973,12 +1191,22 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         <div className={`rounded-2xl border px-3 py-2 text-[11px] ${
                           smartCustomSplitResult.isValid
                             ? 'bg-[#121418] border-slate-800 text-slate-500'
-                            : 'bg-rose-950/30 border-rose-900/40 text-rose-200'
+                            : 'bg-[#e07a5f] border-[#e07a5f] text-[#3d405b] font-bold'
                         }`}>
                           <div className="mb-2 border-b border-slate-800 pb-2">
                             <p className="font-mono text-slate-200">
                               Total: {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
                             </p>
+                            {isServiceFeeEnabled && (
+                              <>
+                                <p className="font-mono text-slate-500 mt-1">
+                                  Pre-fee subtotal: {Number.isFinite(convertedSubtotalAmount) ? convertedSubtotalAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                                </p>
+                                <p className="font-mono text-slate-500 mt-1">
+                                  Service fee: {Number.isFinite(convertedFeeAmount) ? convertedFeeAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                                </p>
+                              </>
+                            )}
                             {convertedTotalDisplay?.converted && (
                               <p className="font-mono text-indigo-300 mt-1">
                                 {convertedTotalDisplay.primary}
@@ -989,7 +1217,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             )}
                           </div>
                           <p>
-                            Remaining to distribute: {smartCustomSplitResult.remainingAmount.toFixed(2)} {tripBaseCurrency}
+                            Remaining {isServiceFeeEnabled ? 'pre-fee subtotal' : 'amount'} to distribute: {smartCustomSplitResult.remainingAmount.toFixed(2)} {tripBaseCurrency}
                           </p>
                           {!smartCustomSplitResult.isValid && smartCustomSplitResult.error && (
                             <p className="mt-1">{smartCustomSplitResult.error}</p>
@@ -1001,6 +1229,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           const manualValue = formCustomSplits[participantId] ?? '';
                           const isManual = manualValue.trim() !== '' && splitRow?.mode === 'manual';
                           const displaySplit = splitRow?.amount_owed ?? 0;
+                          const displaySubtotalSplit = splitRow?.subtotal_amount_owed ?? displaySplit;
+                          const displayFeeSplit = splitRow?.fee_amount_owed ?? 0;
                           const displaySplitEquivalent = formatDisplayMoney(
                             displaySplit,
                             tripBaseCurrency,
@@ -1021,7 +1251,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                                 </span>
                                 {!isManual && (
                                   <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                    Auto {displaySplit.toFixed(2)} {tripBaseCurrency}
+                                    Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
+                                  </span>
+                                )}
+                                {isServiceFeeEnabled && (
+                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                    +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
                                   </span>
                                 )}
                                 {displaySplitEquivalent.converted && (
@@ -1045,7 +1280,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                                       }));
                                     }
                                   }}
-                                  placeholder={displaySplit.toFixed(2)}
+                                  placeholder={displaySubtotalSplit.toFixed(2)}
                                   className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
                                 />
                                 <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
@@ -1166,16 +1401,24 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 </p>
               </div>
 
-              <button
-                type="button"
-                id="btn-add-expense-tab"
-                onClick={handleOpenAddForm}
-                className="w-12 h-12 bg-indigo-600 active:scale-95 text-slate-950 rounded-full shadow-lg transition-all flex items-center justify-center cursor-pointer accent-glow"
-                title="Add Expense"
-              >
-                <Plus className="w-5 h-5 stroke-[2.5]" />
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  id="btn-add-expense-tab"
+                  onClick={handleOpenAddForm}
+                  className="w-12 h-12 bg-indigo-600 active:scale-95 text-slate-950 rounded-full shadow-lg transition-all flex items-center justify-center cursor-pointer accent-glow"
+                  title="Add Expense"
+                >
+                  <Plus className="w-5 h-5 stroke-[2.5]" />
+                </button>
+              )}
             </div>
+
+            {isReadOnly && (
+              <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs text-amber-100 leading-relaxed">
+                {readOnlyMessage}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-2xl bg-[#1a1d23] border border-slate-800/80 p-4">
@@ -1278,6 +1521,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         <span className="text-[11px] text-slate-500 mt-1 block truncate">
                           Paid by {paidBy ? (paidBy.id === currentMember.id ? 'You' : paidBy.display_name) : 'Removed member'} - {expense.expense_date}
                         </span>
+                        {(expense.fee_percent ?? 0) > 0 && (
+                          <span className="text-[10px] text-slate-500 mt-1 block truncate">
+                            Includes {expense.fee_percent?.toString()}% {expense.fee_label || 'service fee'}
+                          </span>
+                        )}
                       </span>
 
                       <span className="text-right shrink-0">
@@ -1349,6 +1597,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         {detailDisplayAmount.helper}
                       </p>
                     )}
+                    {(detailExpense.fee_percent ?? 0) > 0 && (
+                      <div className="mt-3 text-[10px] text-slate-500 font-mono leading-relaxed">
+                        <p>Subtotal {(detailExpense.subtotal_amount ?? detailExpense.amount).toFixed(2)} {detailExpense.currency}</p>
+                        <p>{detailExpense.fee_label || 'Service fee'} {detailExpense.fee_percent}% +{(detailExpense.fee_amount ?? 0).toFixed(2)} {detailExpense.currency}</p>
+                      </div>
+                    )}
                   </div>
                   {detailExpense.currency !== tripBaseCurrency && (
                     <div className="text-right">
@@ -1404,6 +1658,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         </span>
                         <span className="font-mono font-bold text-slate-100">
                           {Number.isFinite(split.amount_owed) ? split.amount_owed.toFixed(2) : '--'} {tripBaseCurrency}
+                          {((split.fee_amount_owed ?? 0) > 0 || (detailExpense.fee_percent ?? 0) > 0) && (
+                            <span className="block text-[10px] text-slate-500 font-normal mt-0.5">
+                              {(split.subtotal_amount_owed ?? split.amount_owed).toFixed(2)} + {(split.fee_amount_owed ?? 0).toFixed(2)}
+                            </span>
+                          )}
                         </span>
                       </div>
                     );
@@ -1422,7 +1681,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             </div>
 
             <div className="bg-[#1a1d23] border-t border-slate-800 p-4 shrink-0">
-              {currentMember.role === 'admin' || detailExpense.created_by_member_id === currentMember.id ? (
+              {!isReadOnly && (currentMember.role === 'admin' || detailExpense.created_by_member_id === currentMember.id) ? (
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
@@ -1448,7 +1707,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 </div>
               ) : (
                 <p className="text-xs text-slate-500 text-center leading-normal">
-                  Only the creator or an admin can modify this expense.
+                  {isReadOnly
+                    ? readOnlyMessage
+                    : 'Only the creator or an admin can modify this expense.'}
                 </p>
               )}
             </div>
@@ -1460,17 +1721,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-[#121418] rounded-3xl p-5 shadow-2xl max-w-sm w-full border border-slate-800 flex flex-col gap-4 animate-fade-in">
             <div className="text-center">
-              <div className="w-12 h-12 rounded-full bg-rose-950/50 border border-rose-900/40 text-rose-500 flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 rounded-full bg-[var(--color-negative)]/15 border border-[var(--color-negative)]/45 text-[var(--color-negative)] flex items-center justify-center mx-auto mb-3">
                 <Trash2 className="w-5 h-5" />
               </div>
               <h4 className="text-sm font-bold text-white font-display">Delete expense?</h4>
               <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                This will remove the expense and recalculate balances for the trip.
+                This will remove the expense from normal lists and recalculate balances. If this expense was already part of a paid settlement, void that settlement first.
               </p>
             </div>
 
             {formError && (
-              <div className="bg-rose-950/45 border border-rose-800/70 text-rose-200 p-3 rounded-2xl text-xs flex gap-2 items-start">
+              <div className="bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{formError}</span>
               </div>

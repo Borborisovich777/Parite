@@ -13,6 +13,7 @@ interface ExchangeRatesSheetProps {
   exchangeRates?: ExchangeRate[];
   onClose: () => void;
   onUpdateRate: (fromCurrency: Currency, toCurrency: Currency, rate: number) => Promise<void>;
+  onActionError?: (message: string) => void;
 }
 
 export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
@@ -22,6 +23,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   exchangeRates = [],
   onClose,
   onUpdateRate,
+  onActionError,
 }) => {
   const [rateInputs, setRateInputs] = useState<Record<string, string>>({});
   const [savingPair, setSavingPair] = useState<string | null>(null);
@@ -54,13 +56,23 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   if (!isOpen) return null;
 
   const isAdmin = currentMember.role === 'admin' && currentMember.status === 'approved';
+  const getSafeMessage = (error: unknown, fallback: string) => {
+    if (!(error instanceof Error) || !error.message.trim()) return fallback;
+
+    const message = error.message.trim();
+    const looksRaw = /(PGRST|SQLSTATE|violates|constraint|duplicate key|invalid input syntax|relation .* does not exist|function .* does not exist|column .* does not exist)/i.test(message);
+
+    return looksRaw ? fallback : message;
+  };
 
   const handleSave = async (fromCurrency: Currency) => {
     const rawValue = rateInputs[fromCurrency] ?? '';
     const rate = parsePositiveDecimal(rawValue);
 
     if (rate === null) {
-      setError('Exchange rate must be greater than zero.');
+      const message = 'Exchange rate must be greater than zero.';
+      setError(message);
+      onActionError?.(message);
       return;
     }
 
@@ -70,7 +82,9 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
       await onUpdateRate(fromCurrency, tripBaseCurrency, rate);
     } catch (saveError) {
       console.error(saveError);
-      setError(saveError instanceof Error ? saveError.message : 'Could not save exchange rate.');
+      const message = getSafeMessage(saveError, 'Could not save exchange rate.');
+      setError(message);
+      onActionError?.(message);
     } finally {
       setSavingPair(null);
     }
@@ -107,7 +121,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
 
         <div className="px-4 py-4 flex flex-col gap-3">
           {error && (
-            <div className="rounded-2xl border border-[var(--color-negative)]/40 bg-[var(--color-negative)]/15 px-3 py-2 text-xs text-rose-100">
+            <div className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-bold text-[#3d405b]">
               {error}
             </div>
           )}
