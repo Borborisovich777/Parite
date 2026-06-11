@@ -124,6 +124,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     onActionError?.(message);
   };
 
+  const setValidationError = (message: string) => {
+    setBlockingError(message);
+  };
+
   const getBlockingErrorMessage = (error: unknown, fallback: string) => {
     if (!(error instanceof Error) || !error.message.trim()) return fallback;
 
@@ -391,23 +395,23 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const validateBasicFields = () => {
     if (!formTitle.trim()) {
-      setFormError('Title is required');
+      setValidationError('Title is required');
       return false;
     }
 
     const amount = parseFloat(formAmount);
     if (Number.isNaN(amount) || amount <= 0) {
-      setFormError(isServiceFeeEnabled ? 'Subtotal must be greater than zero' : 'Amount must be greater than zero');
+      setValidationError(isServiceFeeEnabled ? 'Subtotal must be greater than zero' : 'Amount must be greater than zero');
       return false;
     }
 
     if (!hasValidFeePercent) {
-      setBlockingError('Service fee must be between 0 and 100 percent');
+      setValidationError('Service fee must be between 0 and 100 percent');
       return false;
     }
 
     if (!formPayer) {
-      setFormError('Choose who paid');
+      setValidationError('Choose who paid');
       return false;
     }
 
@@ -642,13 +646,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     {isServiceFeeEnabled ? 'Subtotal before fee' : 'Amount'}
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
+                    type="text"
+                    inputMode="decimal"
                     required
                     id="input-expense-amount"
                     value={formAmount}
-                    onChange={event => setFormAmount(event.target.value)}
+                    onChange={event => {
+                      const nextValue = event.target.value;
+                      if (isMoneyInputValue(nextValue)) {
+                        setFormAmount(nextValue);
+                      }
+                    }}
                     placeholder="0.00"
                     className="w-full bg-[#1a1d23] border border-slate-800 rounded-2xl px-4 py-4 font-mono text-3xl font-bold text-white placeholder-slate-700 focus:border-indigo-500 focus:outline-none"
                   />
@@ -1415,7 +1423,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             </div>
 
             {isReadOnly && (
-              <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs text-amber-100 leading-relaxed">
+              <div className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-4 py-3 text-xs text-[#3d405b] font-semibold leading-relaxed shadow-sm">
                 {readOnlyMessage}
               </div>
             )}
@@ -1488,10 +1496,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               <div className="text-center py-14 px-4 border border-dashed border-slate-800 rounded-3xl bg-[#1a1d23]">
                 <Search className="w-9 h-9 text-slate-700 mx-auto mb-3" />
                 <p className="text-sm text-slate-300 font-semibold">
-                  {searchQuery ? 'No expenses found' : 'No expenses yet'}
+                  {searchQuery ? 'No expenses found' : isReadOnly ? 'No expenses in this read-only trip' : 'No expenses yet'}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  {searchQuery ? 'Try a different search.' : 'Tap the plus button to add the first shared cost.'}
+                  {searchQuery
+                    ? 'Try a different search.'
+                    : isReadOnly
+                      ? 'This trip is read-only, but historical expenses will appear here.'
+                      : 'Tap the plus button to add the first shared cost.'}
                 </p>
               </div>
             ) : (

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  Download,
   Edit2,
   LogOut,
   Plus,
@@ -17,6 +18,8 @@ import { Currency, Member, Trip } from '../types';
 import { WorkspaceSummary } from '../lib/tripRepository';
 
 const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT'];
+type ExportType = 'expenses' | 'balances' | 'settlements';
+type LifecycleAction = 'leave' | 'start-close' | 'approve-close' | 'cancel-close';
 
 interface SideMenuProps {
   isOpen: boolean;
@@ -41,6 +44,10 @@ interface SideMenuProps {
   onStartTripClosure: () => Promise<void>;
   onApproveTripClosure: () => Promise<void>;
   onCancelTripClosure: () => Promise<void>;
+  onExportExpensesCsv: () => void;
+  onExportBalancesCsv: () => void;
+  onExportSettlementsCsv: () => void;
+  exportBusy: ExportType | null;
   onActionError?: (message: string) => void;
   onLogout: () => void | Promise<void>;
 }
@@ -68,6 +75,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   onStartTripClosure,
   onApproveTripClosure,
   onCancelTripClosure,
+  onExportExpensesCsv,
+  onExportBalancesCsv,
+  onExportSettlementsCsv,
+  exportBusy,
   onActionError,
   onLogout,
 }) => {
@@ -79,7 +90,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   const isApprovedMember = currentMember?.status === 'approved';
   const [displayCurrencyInput, setDisplayCurrencyInput] = useState<Currency | ''>(currentMember?.display_currency ?? '');
   const [isSavingDisplayCurrency, setIsSavingDisplayCurrency] = useState(false);
-  const [isLifecycleBusy, setIsLifecycleBusy] = useState(false);
+  const [lifecycleBusyAction, setLifecycleBusyAction] = useState<LifecycleAction | null>(null);
   const [isRegeneratingInvite, setIsRegeneratingInvite] = useState(false);
   const [isSavingTripName, setIsSavingTripName] = useState(false);
   const [displayCurrencyError, setDisplayCurrencyError] = useState<string | null>(null);
@@ -207,15 +218,15 @@ export const SideMenu: React.FC<SideMenuProps> = ({
     }
   };
 
-  const runLifecycleAction = async (action: () => Promise<void>) => {
-    setIsLifecycleBusy(true);
+  const runLifecycleAction = async (actionType: LifecycleAction, action: () => Promise<void>) => {
+    setLifecycleBusyAction(actionType);
     try {
       await action();
       onClose();
     } catch (error) {
       console.error(error);
     } finally {
-      setIsLifecycleBusy(false);
+      setLifecycleBusyAction(null);
     }
   };
 
@@ -304,11 +315,11 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 <button
                   type="button"
                   id="btn-approve-trip-closure"
-                  onClick={() => runLifecycleAction(onApproveTripClosure)}
-                  disabled={isLifecycleBusy}
+                  onClick={() => runLifecycleAction('approve-close', onApproveTripClosure)}
+                  disabled={lifecycleBusyAction !== null}
                   className="w-full min-h-11 rounded-2xl bg-[var(--color-positive)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                 >
-                  Approve close trip
+                  {lifecycleBusyAction === 'approve-close' ? 'Approving close request...' : 'Approve close trip'}
                 </button>
               )}
 
@@ -318,18 +329,18 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   id="btn-leave-trip"
                   onClick={() => {
                     if (confirm('Leave this trip? Your historical expenses will stay visible.')) {
-                      runLifecycleAction(onLeaveTrip);
+                      runLifecycleAction('leave', onLeaveTrip);
                     }
                   }}
-                  disabled={isLifecycleBusy}
+                  disabled={lifecycleBusyAction !== null}
                   className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                 >
-                  Leave trip
+                  {lifecycleBusyAction === 'leave' ? 'Leaving trip...' : 'Leave trip'}
                 </button>
               )}
 
               {isTripClosed && (
-                <p className="text-xs text-slate-500 leading-relaxed">
+                <p className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-semibold text-[#3d405b] leading-relaxed">
                   This trip is closed and read-only.
                 </p>
               )}
@@ -420,7 +431,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     </div>
                   </>
                 ) : (
-                  <p className="text-xs text-slate-500 leading-relaxed">
+                  <p className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-semibold text-[#3d405b] leading-relaxed">
                     Admin settings are read-only while this trip is {tripStatus}.
                   </p>
                 )}
@@ -477,13 +488,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                         id="btn-start-trip-closure"
                         onClick={() => {
                           if (confirm('Start closing this trip? Everyone must approve before it becomes read-only.')) {
-                            runLifecycleAction(onStartTripClosure);
+                            runLifecycleAction('start-close', onStartTripClosure);
                           }
                         }}
-                        disabled={isLifecycleBusy}
+                        disabled={lifecycleBusyAction !== null}
                         className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                       >
-                        Start close request
+                        {lifecycleBusyAction === 'start-close' ? 'Starting close request...' : 'Start close request'}
                       </button>
                     </>
                   )}
@@ -492,11 +503,11 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     <button
                       type="button"
                       id="btn-cancel-trip-closure"
-                      onClick={() => runLifecycleAction(onCancelTripClosure)}
-                      disabled={isLifecycleBusy}
+                      onClick={() => runLifecycleAction('cancel-close', onCancelTripClosure)}
+                      disabled={lifecycleBusyAction !== null}
                       className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                     >
-                      Cancel close request
+                      {lifecycleBusyAction === 'cancel-close' ? 'Cancelling close request...' : 'Cancel close request'}
                     </button>
                   )}
                 </div>
@@ -538,6 +549,46 @@ export const SideMenu: React.FC<SideMenuProps> = ({
               {isSavingDisplayCurrency ? 'Saving...' : 'Save display currency'}
             </button>
           </section>
+
+          {isApprovedMember && (
+            <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-3">
+                Export
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  id="btn-export-expenses-csv"
+                  onClick={onExportExpensesCsv}
+                  disabled={exportBusy !== null}
+                  className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40 disabled:opacity-60"
+                >
+                  <Download className="w-4 h-4 text-indigo-300" />
+                  {exportBusy === 'expenses' ? 'Exporting expenses...' : 'Export expenses CSV'}
+                </button>
+                <button
+                  type="button"
+                  id="btn-export-balances-csv"
+                  onClick={onExportBalancesCsv}
+                  disabled={exportBusy !== null}
+                  className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40 disabled:opacity-60"
+                >
+                  <Download className="w-4 h-4 text-indigo-300" />
+                  {exportBusy === 'balances' ? 'Exporting balances...' : 'Export balances CSV'}
+                </button>
+                <button
+                  type="button"
+                  id="btn-export-settlements-csv"
+                  onClick={onExportSettlementsCsv}
+                  disabled={exportBusy !== null}
+                  className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40 disabled:opacity-60"
+                >
+                  <Download className="w-4 h-4 text-indigo-300" />
+                  {exportBusy === 'settlements' ? 'Exporting settlements...' : 'Export settlements CSV'}
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
             <div className="flex items-center justify-between mb-3">

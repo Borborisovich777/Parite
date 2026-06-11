@@ -32,7 +32,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               Something went wrong
             </h1>
             <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-              SaiHat hit a screen error. Reload the app and try again.
+              Parité hit a screen error. Reload the app and try again.
             </p>
             <button
               type="button"

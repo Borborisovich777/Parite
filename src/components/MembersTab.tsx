@@ -3,6 +3,7 @@ import { Trip, Member } from '../types';
 import { Clock, Shield, Trash2, UserCheck, UserX } from 'lucide-react';
 
 type MemberCategory = 'approved' | 'requests' | 'removed';
+type BusyMemberAction = 'approve' | 'reject' | 'remove' | 'promote' | 'demote';
 
 interface MembersTabProps {
   trip: Trip;
@@ -28,7 +29,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   onDemoteAdmin,
 }) => {
   const [activeCategory, setActiveCategory] = useState<MemberCategory>(initialCategory);
-  const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const [busyMemberAction, setBusyMemberAction] = useState<{ memberId: string; action: BusyMemberAction } | null>(null);
 
   const isAdmin = currentMember.role === 'admin';
   const isTripActive = (trip.status ?? 'active') === 'active';
@@ -40,16 +41,18 @@ export const MembersTab: React.FC<MembersTabProps> = ({
     setActiveCategory(initialCategory);
   }, [initialCategory]);
 
-  const runMemberAction = async (memberId: string, action: () => void | Promise<void>) => {
-    setBusyMemberId(memberId);
+  const runMemberAction = async (memberId: string, actionType: BusyMemberAction, action: () => void | Promise<void>) => {
+    setBusyMemberAction({ memberId, action: actionType });
     try {
       await action();
     } catch (error) {
       console.error(error);
     } finally {
-      setBusyMemberId(null);
+      setBusyMemberAction(null);
     }
   };
+
+  const isMemberBusy = (memberId: string) => busyMemberAction?.memberId === memberId;
 
   return (
     <div className="flex flex-col gap-4 pb-24 animate-fade-in px-4 pt-4">
@@ -142,25 +145,25 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                         id={`btn-demote-admin-${member.id}`}
                         onClick={() => {
                           if (confirm(`Remove admin permissions from ${member.display_name}? They will stay in the trip as a member.`)) {
-                            runMemberAction(member.id, () => onDemoteAdmin(member.id));
+                            runMemberAction(member.id, 'demote', () => onDemoteAdmin(member.id));
                           }
                         }}
-                        disabled={busyMemberId === member.id}
+                        disabled={isMemberBusy(member.id)}
                         className="text-slate-950 bg-[var(--color-negative)] px-3 py-2.5 rounded-xl transition-colors cursor-pointer text-[10px] font-bold"
                         title="Remove admin"
                       >
-                        Remove admin
+                        {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'demote' ? 'Removing admin...' : 'Remove admin'}
                       </button>
                     ) : (
                       <button
                         type="button"
                         id={`btn-promote-member-${member.id}`}
-                        onClick={() => runMemberAction(member.id, () => onPromoteMember(member.id))}
-                        disabled={busyMemberId === member.id}
+                        onClick={() => runMemberAction(member.id, 'promote', () => onPromoteMember(member.id))}
+                        disabled={isMemberBusy(member.id)}
                         className="text-slate-950 bg-[var(--color-positive)] px-3 py-2.5 rounded-xl transition-colors cursor-pointer text-[10px] font-bold"
                         title="Make admin"
                       >
-                        Make admin
+                        {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'promote' ? 'Making admin...' : 'Make admin'}
                       </button>
                     )}
                     <button
@@ -168,14 +171,19 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                       id={`btn-remove-member-${member.id}`}
                       onClick={() => {
                         if (confirm(`Remove ${member.display_name}? Historical expenses paid or split by them remain intact.`)) {
-                          runMemberAction(member.id, () => onRemoveMember(member.id));
+                          runMemberAction(member.id, 'remove', () => onRemoveMember(member.id));
                         }
                       }}
-                      disabled={busyMemberId === member.id}
+                      disabled={isMemberBusy(member.id)}
                       className="text-slate-950 bg-[var(--color-negative)] p-2.5 rounded-xl transition-colors cursor-pointer"
-                      title="Remove member"
+                      title={busyMemberAction?.memberId === member.id && busyMemberAction.action === 'remove' ? 'Removing member...' : 'Remove member'}
+                      aria-label={busyMemberAction?.memberId === member.id && busyMemberAction.action === 'remove' ? 'Removing member' : 'Remove member'}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'remove' ? (
+                        <span className="text-[10px] font-bold">Removing...</span>
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
                     </button>
                   </div>
                 )}
@@ -214,23 +222,23 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                   <button
                     type="button"
                     id={`btn-reject-request-${request.id}`}
-                    onClick={() => runMemberAction(request.id, () => onRejectMember(request.id))}
-                    disabled={busyMemberId === request.id || !isTripActive}
+                    onClick={() => runMemberAction(request.id, 'reject', () => onRejectMember(request.id))}
+                    disabled={isMemberBusy(request.id) || !isTripActive}
                     className="bg-[var(--color-negative)] text-slate-950 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserX className="w-3.5 h-3.5" />
-                    <span>Reject</span>
+                    <span>{busyMemberAction?.memberId === request.id && busyMemberAction.action === 'reject' ? 'Rejecting...' : 'Reject'}</span>
                   </button>
 
                   <button
                     type="button"
                     id={`btn-approve-request-${request.id}`}
-                    onClick={() => runMemberAction(request.id, () => onApproveMember(request.id))}
-                    disabled={busyMemberId === request.id || !isTripActive}
+                    onClick={() => runMemberAction(request.id, 'approve', () => onApproveMember(request.id))}
+                    disabled={isMemberBusy(request.id) || !isTripActive}
                     className="bg-[var(--color-positive)] text-slate-950 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserCheck className="w-3.5 h-3.5" />
-                    <span>Approve</span>
+                    <span>{busyMemberAction?.memberId === request.id && busyMemberAction.action === 'approve' ? 'Approving...' : 'Approve'}</span>
                   </button>
                 </div>
               </div>
@@ -261,11 +269,11 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => runMemberAction(member.id, () => onApproveMember(member.id))}
-                  disabled={busyMemberId === member.id || !isTripActive}
+                  onClick={() => runMemberAction(member.id, 'approve', () => onApproveMember(member.id))}
+                  disabled={isMemberBusy(member.id) || !isTripActive}
                   className="text-[10px] bg-[#121418] border border-slate-800 text-slate-200 hover:bg-slate-800 rounded-xl px-3 py-2 font-bold cursor-pointer"
                 >
-                  Approve
+                  {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'approve' ? 'Approving...' : 'Approve'}
                 </button>
               </div>
             ))

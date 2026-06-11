@@ -55,100 +55,100 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.tripbalance-shell {
+.parite-shell {
   color: var(--color-text);
 }
 
-.tripbalance-shell .bg-\[\#121418\],
-.tripbalance-shell .bg-\[\#121418\]\/95 {
+.parite-shell .bg-\[\#121418\],
+.parite-shell .bg-\[\#121418\]\/95 {
   background-color: var(--color-app-background) !important;
 }
 
-.tripbalance-shell .bg-\[\#1a1d23\],
-.tripbalance-shell .bg-\[\#1a1d23\]\/95,
-.tripbalance-shell .bg-\[\#20242b\],
-.tripbalance-shell .bg-slate-800 {
+.parite-shell .bg-\[\#1a1d23\],
+.parite-shell .bg-\[\#1a1d23\]\/95,
+.parite-shell .bg-\[\#20242b\],
+.parite-shell .bg-slate-800 {
   background-color: var(--color-surface) !important;
 }
 
-.tripbalance-shell .bg-slate-700,
-.tripbalance-shell .bg-slate-750,
-.tripbalance-shell .bg-slate-900,
-.tripbalance-shell .bg-\[\#050607\] {
+.parite-shell .bg-slate-700,
+.parite-shell .bg-slate-750,
+.parite-shell .bg-slate-900,
+.parite-shell .bg-\[\#050607\] {
   background-color: var(--color-surface-soft) !important;
 }
 
-.tripbalance-shell .border-slate-900,
-.tripbalance-shell .border-slate-800,
-.tripbalance-shell .border-slate-800\/80,
-.tripbalance-shell .border-slate-800\/75,
-.tripbalance-shell .border-slate-800\/70,
-.tripbalance-shell .border-slate-800\/60,
-.tripbalance-shell .border-slate-800\/45,
-.tripbalance-shell .border-slate-800\/40,
-.tripbalance-shell .border-slate-800\/30,
-.tripbalance-shell .border-slate-700,
-.tripbalance-shell .border-slate-700\/80 {
+.parite-shell .border-slate-900,
+.parite-shell .border-slate-800,
+.parite-shell .border-slate-800\/80,
+.parite-shell .border-slate-800\/75,
+.parite-shell .border-slate-800\/70,
+.parite-shell .border-slate-800\/60,
+.parite-shell .border-slate-800\/45,
+.parite-shell .border-slate-800\/40,
+.parite-shell .border-slate-800\/30,
+.parite-shell .border-slate-700,
+.parite-shell .border-slate-700\/80 {
   border-color: var(--color-border) !important;
 }
 
-.tripbalance-shell .text-white,
-.tripbalance-shell .text-slate-100,
-.tripbalance-shell .text-slate-200,
-.tripbalance-shell .text-slate-300 {
+.parite-shell .text-white,
+.parite-shell .text-slate-100,
+.parite-shell .text-slate-200,
+.parite-shell .text-slate-300 {
   color: var(--color-text) !important;
 }
 
-.tripbalance-shell .text-slate-400,
-.tripbalance-shell .text-slate-500,
-.tripbalance-shell .text-slate-600 {
+.parite-shell .text-slate-400,
+.parite-shell .text-slate-500,
+.parite-shell .text-slate-600 {
   color: var(--color-muted) !important;
 }
 
-.tripbalance-shell .text-indigo-200,
-.tripbalance-shell .text-indigo-300,
-.tripbalance-shell .text-indigo-400,
-.tripbalance-shell .text-emerald-300,
-.tripbalance-shell .text-emerald-400 {
+.parite-shell .text-indigo-200,
+.parite-shell .text-indigo-300,
+.parite-shell .text-indigo-400,
+.parite-shell .text-emerald-300,
+.parite-shell .text-emerald-400 {
   color: #4f7f68 !important;
 }
 
-.tripbalance-shell .text-rose-200,
-.tripbalance-shell .text-rose-300,
-.tripbalance-shell .text-rose-400,
-.tripbalance-shell .text-rose-500 {
+.parite-shell .text-rose-200,
+.parite-shell .text-rose-300,
+.parite-shell .text-rose-400,
+.parite-shell .text-rose-500 {
   color: #b85f49 !important;
 }
 
-.tripbalance-shell .bg-indigo-600,
-.tripbalance-shell .bg-emerald-600,
-.tripbalance-shell .bg-\[var\(--color-positive\)\] {
+.parite-shell .bg-indigo-600,
+.parite-shell .bg-emerald-600,
+.parite-shell .bg-\[var\(--color-positive\)\] {
   background-color: var(--color-positive) !important;
 }
 
-.tripbalance-shell .bg-rose-500,
-.tripbalance-shell .bg-rose-600,
-.tripbalance-shell .bg-\[var\(--color-negative\)\] {
+.parite-shell .bg-rose-500,
+.parite-shell .bg-rose-600,
+.parite-shell .bg-\[var\(--color-negative\)\] {
   background-color: var(--color-negative) !important;
 }
 
-.tripbalance-shell input,
-.tripbalance-shell select,
-.tripbalance-shell textarea {
+.parite-shell input,
+.parite-shell select,
+.parite-shell textarea {
   background-color: var(--color-surface) !important;
   color: var(--color-text) !important;
   border-color: var(--color-border) !important;
 }
 
-.tripbalance-shell input::placeholder,
-.tripbalance-shell textarea::placeholder {
+.parite-shell input::placeholder,
+.parite-shell textarea::placeholder {
   color: #9ca3af !important;
 }
 
-.tripbalance-shell button:disabled,
-.tripbalance-shell input:disabled,
-.tripbalance-shell select:disabled,
-.tripbalance-shell textarea:disabled {
+.parite-shell button:disabled,
+.parite-shell input:disabled,
+.parite-shell select:disabled,
+.parite-shell textarea:disabled {
   opacity: 0.58;
 }
 

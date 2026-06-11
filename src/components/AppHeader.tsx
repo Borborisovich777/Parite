@@ -34,7 +34,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 leading-none">
-          TripBalance
+          Parité
         </p>
         <h1 className="text-base font-bold text-white font-display truncate leading-tight mt-1">
           {trip.name}

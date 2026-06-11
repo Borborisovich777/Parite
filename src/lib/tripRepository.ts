@@ -219,28 +219,59 @@ function throwSupabaseError(error: unknown): never {
       row.hint,
       row.code,
     ].filter(Boolean).join(' ');
+    const normalizedMessage = rawMessage.toLowerCase();
 
     if (
       row.code === '23505' ||
       rawMessage.includes('members_trip_display_name_lower_idx') ||
-      rawMessage.toLowerCase().includes('duplicate key')
+      normalizedMessage.includes('duplicate key')
     ) {
       throw new Error(DUPLICATE_DISPLAY_NAME_MESSAGE);
     }
 
     if (
       rawMessage.includes(SETTLEMENT_EXPENSE_GUARD_MESSAGE) ||
-      rawMessage.toLowerCase().includes('void the related settlement')
+      normalizedMessage.includes('void the related settlement')
     ) {
       throw new Error(SETTLEMENT_EXPENSE_GUARD_MESSAGE);
     }
 
-    if (rawMessage.toLowerCase().includes('this trip is being closed')) {
+    if (normalizedMessage.includes('this trip is being closed')) {
       throw new Error(TRIP_CLOSING_READONLY_MESSAGE);
     }
 
-    if (rawMessage.toLowerCase().includes('this trip is closed')) {
+    if (normalizedMessage.includes('this trip is closed')) {
       throw new Error(TRIP_CLOSED_READONLY_MESSAGE);
+    }
+
+    const friendlyMessages = [
+      'You still have an open balance. Settle up before leaving this trip.',
+      'That member still has an open balance. Settle up before removing them.',
+      'This trip needs at least one admin. Promote another member before leaving.',
+      'This trip needs at least one admin. Promote another member before removing this admin.',
+      'This trip needs at least one admin.',
+      'Only admins can change admin roles.',
+      'You cannot remove your own admin role.',
+      'Admin roles cannot be changed while this trip is closing or closed.',
+      'This trip cannot be closed until everyone is settled.',
+      'Only approved admins can manage this trip.',
+      'Only approved trip members can perform this action.',
+      'The receiver or a trip admin can confirm this settlement.',
+      'Only the receiver or a trip admin can void this settlement.',
+      'Trip name is required.',
+      'Invalid display currency.',
+      'Invalid invite code.',
+      'Invite code not found.',
+      'Exchange rate must be greater than zero.',
+      'Service fee must be between 0 and 100 percent.',
+      'Split amounts must match the converted expense total.',
+    ];
+
+    const friendlyMatch = friendlyMessages.find(message =>
+      normalizedMessage.includes(message.toLowerCase())
+    );
+    if (friendlyMatch) {
+      throw new Error(friendlyMatch);
     }
 
     const messageParts = [
