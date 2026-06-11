@@ -36,11 +36,22 @@ export interface SmartCustomSplitRow {
   member_id: string;
   amount_owed: number;
   amount_cents: number;
+  subtotal_amount_owed?: number;
+  subtotal_cents?: number;
+  fee_amount_owed?: number;
+  fee_cents?: number;
   mode: 'manual' | 'auto';
 }
 
+export interface SplitAmountPayload {
+  member_id: string;
+  amount_owed: number;
+  subtotal_amount_owed?: number;
+  fee_amount_owed?: number;
+}
+
 export interface SmartCustomSplitResult {
-  splits: { member_id: string; amount_owed: number }[];
+  splits: SplitAmountPayload[];
   rows: SmartCustomSplitRow[];
   lockedTotal: number;
   remainingAmount: number;
@@ -208,6 +219,251 @@ export function calculateSmartCustomSplits({
     rows,
     lockedTotal: lockedTotalCents / 100,
     remainingAmount: remainingCents / 100,
+    autoParticipantCount,
+    isValid: true,
+  };
+}
+
+function centsToAmount(cents: number): number {
+  return Math.round(cents) / 100;
+}
+
+function allocateFeeCents(
+  subtotalRows: Array<{ member_id: string; subtotal_cents: number }>,
+  subtotalCents: number,
+  feeCents: number
+): Record<string, number> {
+  const feeById: Record<string, number> = {};
+  if (feeCents <= 0 || subtotalCents <= 0) {
+    subtotalRows.forEach(row => {
+      feeById[row.member_id] = 0;
+    });
+    return feeById;
+  }
+
+  let allocated = 0;
+  subtotalRows.forEach(row => {
+    const cents = Math.floor((row.subtotal_cents * feeCents) / subtotalCents);
+    feeById[row.member_id] = cents;
+    allocated += cents;
+  });
+
+  let remainder = feeCents - allocated;
+  for (let index = subtotalRows.length - 1; index >= 0 && remainder > 0; index -= 1) {
+    const row = subtotalRows[index];
+    if (row.subtotal_cents <= 0) continue;
+    feeById[row.member_id] += 1;
+    remainder -= 1;
+  }
+
+  return feeById;
+}
+
+/**
+ * Calculates split rows where custom inputs represent pre-fee base-currency
+ * shares. Fee cents are allocated proportionally and final owed cents always
+ * add up to the canonical final base total.
+ */
+export function calculateSmartCustomSplitsWithFee({
+  subtotalBaseAmount,
+  finalBaseAmount,
+  participantIds,
+  manualSubtotalAmounts,
+}: {
+  subtotalBaseAmount: number;
+  finalBaseAmount: number;
+  participantIds: string[];
+  manualSubtotalAmounts: Record<string, string>;
+}): SmartCustomSplitResult {
+  const subtotalCents = Number.isFinite(subtotalBaseAmount) ? Math.round(subtotalBaseAmount * 100) : 0;
+  const finalCents = Number.isFinite(finalBaseAmount) ? Math.round(finalBaseAmount * 100) : 0;
+  const feeCents = finalCents - subtotalCents;
+
+  if (subtotalCents <= 0 || finalCents <= 0 || feeCents < 0) {
+    return {
+      splits: [],
+      rows: [],
+      lockedTotal: 0,
+      remainingAmount: 0,
+      autoParticipantCount: 0,
+      isValid: false,
+      error: 'Enter a valid subtotal and service fee before customizing the split.',
+    };
+  }
+
+  if (participantIds.length === 0) {
+    return {
+      splits: [],
+      rows: [],
+      lockedTotal: 0,
+      remainingAmount: subtotalCents / 100,
+      autoParticipantCount: 0,
+      isValid: false,
+      error: 'At least one participant must be selected.',
+    };
+  }
+
+  const manualCentsById: Record<string, number> = {};
+  let lockedTotalCents = 0;
+
+  for (const participantId of participantIds) {
+    const parsed = parseManualAmountToCents(manualSubtotalAmounts[participantId] ?? '');
+    if (parsed.kind === 'invalid') {
+      return {
+        splits: [],
+        rows: participantIds.map(id => ({
+          member_id: id,
+          amount_owed: 0,
+          amount_cents: 0,
+          subtotal_amount_owed: 0,
+          subtotal_cents: 0,
+          fee_amount_owed: 0,
+          fee_cents: 0,
+          mode: (manualSubtotalAmounts[id] ?? '').trim() === '' ? 'auto' : 'manual',
+        })),
+        lockedTotal: lockedTotalCents / 100,
+        remainingAmount: (subtotalCents - lockedTotalCents) / 100,
+        autoParticipantCount: participantIds.filter(id => (manualSubtotalAmounts[id] ?? '').trim() === '').length,
+        isValid: false,
+        error: 'Pre-fee split amounts must be zero or positive numbers with up to two decimals.',
+      };
+    }
+
+    if (parsed.kind === 'manual') {
+      manualCentsById[participantId] = parsed.cents;
+      lockedTotalCents += parsed.cents;
+    }
+  }
+
+  const autoParticipantIds = participantIds.filter(id => manualCentsById[id] === undefined);
+  const autoParticipantCount = autoParticipantIds.length;
+  const remainingSubtotalCents = subtotalCents - lockedTotalCents;
+
+  if (remainingSubtotalCents < 0) {
+    const rows = participantIds.map(id => {
+      const subtotal = manualCentsById[id] ?? 0;
+      return {
+        member_id: id,
+        amount_cents: subtotal,
+        amount_owed: centsToAmount(subtotal),
+        subtotal_cents: subtotal,
+        subtotal_amount_owed: centsToAmount(subtotal),
+        fee_cents: 0,
+        fee_amount_owed: 0,
+        mode: manualCentsById[id] === undefined ? 'auto' as const : 'manual' as const,
+      };
+    });
+
+    return {
+      splits: rows.map(({ member_id, amount_owed, subtotal_amount_owed, fee_amount_owed }) => ({
+        member_id,
+        amount_owed,
+        subtotal_amount_owed,
+        fee_amount_owed,
+      })),
+      rows,
+      lockedTotal: lockedTotalCents / 100,
+      remainingAmount: remainingSubtotalCents / 100,
+      autoParticipantCount,
+      isValid: false,
+      error: 'Manual pre-fee split amounts are higher than the subtotal.',
+    };
+  }
+
+  const autoCentsById: Record<string, number> = {};
+  if (autoParticipantCount > 0) {
+    const baseCents = Math.floor(remainingSubtotalCents / autoParticipantCount);
+    const remainderCents = remainingSubtotalCents - (baseCents * autoParticipantCount);
+
+    autoParticipantIds.forEach((id, index) => {
+      autoCentsById[id] = baseCents + (index === autoParticipantCount - 1 ? remainderCents : 0);
+    });
+  } else if (remainingSubtotalCents !== 0) {
+    const rows = participantIds.map(id => {
+      const subtotal = manualCentsById[id];
+      return {
+        member_id: id,
+        amount_cents: subtotal,
+        amount_owed: centsToAmount(subtotal),
+        subtotal_cents: subtotal,
+        subtotal_amount_owed: centsToAmount(subtotal),
+        fee_cents: 0,
+        fee_amount_owed: 0,
+        mode: 'manual' as const,
+      };
+    });
+
+    return {
+      splits: rows.map(({ member_id, amount_owed, subtotal_amount_owed, fee_amount_owed }) => ({
+        member_id,
+        amount_owed,
+        subtotal_amount_owed,
+        fee_amount_owed,
+      })),
+      rows,
+      lockedTotal: lockedTotalCents / 100,
+      remainingAmount: remainingSubtotalCents / 100,
+      autoParticipantCount: 0,
+      isValid: false,
+      error: 'Manual pre-fee split amounts must add up exactly to the subtotal.',
+    };
+  }
+
+  const subtotalRows = participantIds.map(id => {
+    const isManual = manualCentsById[id] !== undefined;
+    return {
+      member_id: id,
+      subtotal_cents: isManual ? manualCentsById[id] : autoCentsById[id] ?? 0,
+      mode: isManual ? 'manual' as const : 'auto' as const,
+    };
+  });
+  const feeCentsById = allocateFeeCents(subtotalRows, subtotalCents, feeCents);
+
+  const rows = subtotalRows.map(row => {
+    const fee = feeCentsById[row.member_id] ?? 0;
+    const final = row.subtotal_cents + fee;
+    return {
+      member_id: row.member_id,
+      amount_cents: final,
+      amount_owed: centsToAmount(final),
+      subtotal_cents: row.subtotal_cents,
+      subtotal_amount_owed: centsToAmount(row.subtotal_cents),
+      fee_cents: fee,
+      fee_amount_owed: centsToAmount(fee),
+      mode: row.mode,
+    };
+  });
+
+  const subtotalFinalCents = rows.reduce((sum, row) => sum + (row.subtotal_cents ?? 0), 0);
+  const feeFinalCents = rows.reduce((sum, row) => sum + (row.fee_cents ?? 0), 0);
+  const finalSplitCents = rows.reduce((sum, row) => sum + row.amount_cents, 0);
+  if (subtotalFinalCents !== subtotalCents || feeFinalCents !== feeCents || finalSplitCents !== finalCents) {
+    return {
+      splits: rows.map(({ member_id, amount_owed, subtotal_amount_owed, fee_amount_owed }) => ({
+        member_id,
+        amount_owed,
+        subtotal_amount_owed,
+        fee_amount_owed,
+      })),
+      rows,
+      lockedTotal: lockedTotalCents / 100,
+      remainingAmount: remainingSubtotalCents / 100,
+      autoParticipantCount,
+      isValid: false,
+      error: 'Service fee split rounding did not match the final expense total.',
+    };
+  }
+
+  return {
+    splits: rows.map(({ member_id, amount_owed, subtotal_amount_owed, fee_amount_owed }) => ({
+      member_id,
+      amount_owed,
+      subtotal_amount_owed,
+      fee_amount_owed,
+    })),
+    rows,
+    lockedTotal: lockedTotalCents / 100,
+    remainingAmount: remainingSubtotalCents / 100,
     autoParticipantCount,
     isValid: true,
   };

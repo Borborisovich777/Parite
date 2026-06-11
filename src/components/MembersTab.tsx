@@ -1,69 +1,44 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Trip, Member } from '../types';
-import { Check, Clock, Copy, Share2, Shield, Trash2, UserCheck, UserX } from 'lucide-react';
+import { Clock, Shield, Trash2, UserCheck, UserX } from 'lucide-react';
+
+type MemberCategory = 'approved' | 'requests' | 'removed';
 
 interface MembersTabProps {
   trip: Trip;
   currentMember: Member;
   members: Member[];
+  initialCategory?: MemberCategory;
   onApproveMember: (memberId: string) => void | Promise<void>;
   onRejectMember: (memberId: string) => void | Promise<void>;
   onRemoveMember: (memberId: string) => void | Promise<void>;
+  onPromoteMember: (memberId: string) => void | Promise<void>;
+  onDemoteAdmin: (memberId: string) => void | Promise<void>;
 }
 
 export const MembersTab: React.FC<MembersTabProps> = ({
   trip,
   currentMember,
   members,
+  initialCategory = 'approved',
   onApproveMember,
   onRejectMember,
   onRemoveMember,
+  onPromoteMember,
+  onDemoteAdmin,
 }) => {
-  const [copied, setCopied] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<'approved' | 'requests' | 'removed'>('approved');
+  const [activeCategory, setActiveCategory] = useState<MemberCategory>(initialCategory);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
 
   const isAdmin = currentMember.role === 'admin';
+  const isTripActive = (trip.status ?? 'active') === 'active';
   const approvedMembers = members.filter(member => member.status === 'approved');
   const pendingRequests = members.filter(member => member.status === 'pending');
   const otherMembers = members.filter(member => member.status === 'removed' || member.status === 'rejected');
 
-  const showCopied = () => {
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
-  };
-
-  const copyText = async (text: string) => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      showCopied();
-      return;
-    }
-
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-9999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-
-    try {
-      document.execCommand('copy');
-      showCopied();
-    } finally {
-      document.body.removeChild(textArea);
-    }
-  };
-
-  const handleCopyInvite = () => {
-    copyText(trip.invite_code).catch(error => console.error(error));
-  };
-
-  const handleCopyLink = () => {
-    const joinLink = `${window.location.origin}${window.location.pathname}?invite=${trip.invite_code}`;
-    copyText(joinLink).catch(error => console.error(error));
-  };
+  useEffect(() => {
+    setActiveCategory(initialCategory);
+  }, [initialCategory]);
 
   const runMemberAction = async (memberId: string, action: () => void | Promise<void>) => {
     setBusyMemberId(memberId);
@@ -83,52 +58,9 @@ export const MembersTab: React.FC<MembersTabProps> = ({
           Members
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          Invite people and manage access for this trip.
+          Manage access for {trip.name}.
         </p>
       </div>
-
-      <section className="bg-[#1a1d23] text-white rounded-3xl p-4 border border-slate-800 flex flex-col gap-4">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
-            Invite code
-          </p>
-          <h2 className="text-sm font-semibold text-slate-100 mt-1">
-            Share access to {trip.name}
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-[1fr_44px_44px] gap-2 items-center bg-[#121418] p-2.5 rounded-2xl border border-slate-800">
-          <div className="min-w-0">
-            <span id="invite-code-display" className="text-lg font-extrabold text-indigo-300 tracking-widest font-mono">
-              {trip.invite_code}
-            </span>
-          </div>
-
-          <button
-            id="btn-copy-code"
-            onClick={handleCopyInvite}
-            className="h-11 rounded-xl bg-[#1a1d23] hover:bg-slate-800 text-slate-200 border border-slate-800 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
-            title="Copy invite code"
-          >
-            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-          </button>
-
-          <button
-            id="btn-copy-link"
-            onClick={handleCopyLink}
-            className="h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-slate-950 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
-            title="Copy join link"
-          >
-            <Share2 className="w-4 h-4" />
-          </button>
-        </div>
-
-        {copied && (
-          <p className="text-center text-[11px] text-emerald-400 font-mono font-bold">
-            Copied
-          </p>
-        )}
-      </section>
 
       {isAdmin && (
         <div className="grid grid-cols-3 gap-1.5 bg-[#1a1d23] border border-slate-800 p-1 rounded-2xl shrink-0">
@@ -202,20 +134,50 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                   </div>
                 </div>
 
-                {isAdmin && !isCurrentUser && member.role !== 'admin' && (
-                  <button
-                    id={`btn-remove-member-${member.id}`}
-                    onClick={() => {
-                      if (confirm(`Remove ${member.display_name}? Historical expenses paid or split by them remain intact.`)) {
-                        runMemberAction(member.id, () => onRemoveMember(member.id));
-                      }
-                    }}
-                    disabled={busyMemberId === member.id}
-                    className="text-slate-950 bg-[var(--color-negative)] p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
-                    title="Remove member"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {isAdmin && isTripActive && !isCurrentUser && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    {member.role === 'admin' ? (
+                      <button
+                        type="button"
+                        id={`btn-demote-admin-${member.id}`}
+                        onClick={() => {
+                          if (confirm(`Remove admin permissions from ${member.display_name}? They will stay in the trip as a member.`)) {
+                            runMemberAction(member.id, () => onDemoteAdmin(member.id));
+                          }
+                        }}
+                        disabled={busyMemberId === member.id}
+                        className="text-slate-950 bg-[var(--color-negative)] px-3 py-2.5 rounded-xl transition-colors cursor-pointer text-[10px] font-bold"
+                        title="Remove admin"
+                      >
+                        Remove admin
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        id={`btn-promote-member-${member.id}`}
+                        onClick={() => runMemberAction(member.id, () => onPromoteMember(member.id))}
+                        disabled={busyMemberId === member.id}
+                        className="text-slate-950 bg-[var(--color-positive)] px-3 py-2.5 rounded-xl transition-colors cursor-pointer text-[10px] font-bold"
+                        title="Make admin"
+                      >
+                        Make admin
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      id={`btn-remove-member-${member.id}`}
+                      onClick={() => {
+                        if (confirm(`Remove ${member.display_name}? Historical expenses paid or split by them remain intact.`)) {
+                          runMemberAction(member.id, () => onRemoveMember(member.id));
+                        }
+                      }}
+                      disabled={busyMemberId === member.id}
+                      className="text-slate-950 bg-[var(--color-negative)] p-2.5 rounded-xl transition-colors cursor-pointer"
+                      title="Remove member"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
               </div>
             );
@@ -250,9 +212,10 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    type="button"
                     id={`btn-reject-request-${request.id}`}
                     onClick={() => runMemberAction(request.id, () => onRejectMember(request.id))}
-                    disabled={busyMemberId === request.id}
+                    disabled={busyMemberId === request.id || !isTripActive}
                     className="bg-[var(--color-negative)] text-slate-950 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserX className="w-3.5 h-3.5" />
@@ -260,9 +223,10 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                   </button>
 
                   <button
+                    type="button"
                     id={`btn-approve-request-${request.id}`}
                     onClick={() => runMemberAction(request.id, () => onApproveMember(request.id))}
-                    disabled={busyMemberId === request.id}
+                    disabled={busyMemberId === request.id || !isTripActive}
                     className="bg-[var(--color-positive)] text-slate-950 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer flex items-center gap-1"
                   >
                     <UserCheck className="w-3.5 h-3.5" />
@@ -298,7 +262,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                 <button
                   type="button"
                   onClick={() => runMemberAction(member.id, () => onApproveMember(member.id))}
-                  disabled={busyMemberId === member.id}
+                  disabled={busyMemberId === member.id || !isTripActive}
                   className="text-[10px] bg-[#121418] border border-slate-800 text-slate-200 hover:bg-slate-800 rounded-xl px-3 py-2 font-bold cursor-pointer"
                 >
                   Approve

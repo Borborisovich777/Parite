@@ -23,7 +23,9 @@ create table if not exists public.trips (
   name text not null check (char_length(trim(name)) > 0),
   base_currency public.currency_code not null,
   invite_code text not null unique,
-  created_at timestamptz not null default now()
+  status text not null default 'active' check (status in ('active', 'closing', 'closed')),
+  created_at timestamptz not null default now(),
+  closed_at timestamptz
 );
 
 create table if not exists public.members (
@@ -45,6 +47,10 @@ create table if not exists public.expenses (
   trip_id uuid not null references public.trips(id) on delete cascade,
   title text not null check (char_length(trim(title)) > 0),
   amount numeric(14,2) not null check (amount > 0),
+  subtotal_amount numeric(14,2),
+  fee_percent numeric(7,4) not null default 0,
+  fee_amount numeric(14,2) not null default 0,
+  fee_label text,
   currency public.currency_code not null,
   exchange_rate_to_base numeric(18,8) not null check (exchange_rate_to_base > 0),
   converted_amount numeric(14,2) not null check (converted_amount > 0),
@@ -64,6 +70,8 @@ create table if not exists public.expense_splits (
   expense_id uuid not null references public.expenses(id) on delete cascade,
   member_id uuid not null references public.members(id),
   amount_owed numeric(14,2) not null check (amount_owed >= 0),
+  subtotal_amount_owed numeric(14,2),
+  fee_amount_owed numeric(14,2),
   unique (expense_id, member_id)
 );
 
@@ -96,11 +104,21 @@ create table if not exists public.settlements (
   void_reason text
 );
 
+create table if not exists public.trip_closure_votes (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references public.trips(id) on delete cascade,
+  member_id uuid not null references public.members(id),
+  approved_at timestamptz not null default now(),
+  unique (trip_id, member_id)
+);
+
 alter table public.trips add column if not exists id uuid default gen_random_uuid();
 alter table public.trips add column if not exists name text;
 alter table public.trips add column if not exists base_currency public.currency_code;
 alter table public.trips add column if not exists invite_code text;
+alter table public.trips add column if not exists status text not null default 'active';
 alter table public.trips add column if not exists created_at timestamptz not null default now();
+alter table public.trips add column if not exists closed_at timestamptz;
 
 do $$
 declare
@@ -171,11 +189,31 @@ alter table public.expenses add column if not exists updated_at timestamptz not 
 alter table public.expenses add column if not exists deleted_at timestamptz;
 alter table public.expenses add column if not exists deleted_by_member_id uuid references public.members(id);
 alter table public.expenses add column if not exists delete_reason text;
+alter table public.expenses add column if not exists subtotal_amount numeric(14,2);
+alter table public.expenses add column if not exists fee_percent numeric(7,4) not null default 0;
+alter table public.expenses add column if not exists fee_amount numeric(14,2) not null default 0;
+alter table public.expenses add column if not exists fee_label text;
 
 alter table public.expense_splits add column if not exists id uuid default gen_random_uuid();
 alter table public.expense_splits add column if not exists expense_id uuid references public.expenses(id) on delete cascade;
 alter table public.expense_splits add column if not exists member_id uuid references public.members(id);
 alter table public.expense_splits add column if not exists amount_owed numeric(14,2);
+alter table public.expense_splits add column if not exists subtotal_amount_owed numeric(14,2);
+alter table public.expense_splits add column if not exists fee_amount_owed numeric(14,2);
+
+update public.expenses
+set subtotal_amount = coalesce(subtotal_amount, amount),
+    fee_percent = coalesce(fee_percent, 0),
+    fee_amount = coalesce(fee_amount, 0)
+where subtotal_amount is null
+   or fee_percent is null
+   or fee_amount is null;
+
+update public.expense_splits
+set subtotal_amount_owed = coalesce(subtotal_amount_owed, amount_owed),
+    fee_amount_owed = coalesce(fee_amount_owed, 0)
+where subtotal_amount_owed is null
+   or fee_amount_owed is null;
 
 alter table public.exchange_rates add column if not exists id uuid default gen_random_uuid();
 alter table public.exchange_rates add column if not exists trip_id uuid references public.trips(id) on delete cascade;
@@ -290,6 +328,8 @@ create index if not exists settlements_recent_paid_lookup_idx
   on public.settlements (trip_id, from_member_id, to_member_id, currency, status, created_at desc);
 create index if not exists settlements_paid_after_expense_guard_idx
   on public.settlements (trip_id, status, paid_at, created_at);
+create index if not exists trip_closure_votes_trip_idx on public.trip_closure_votes (trip_id);
+create index if not exists trip_closure_votes_member_idx on public.trip_closure_votes (member_id);
 
 alter table public.trips enable row level security;
 alter table public.members enable row level security;
@@ -297,6 +337,7 @@ alter table public.expenses enable row level security;
 alter table public.expense_splits enable row level security;
 alter table public.exchange_rates enable row level security;
 alter table public.settlements enable row level security;
+alter table public.trip_closure_votes enable row level security;
 
 drop function if exists public.create_trip_with_admin(text, text, text);
 drop function if exists public.restore_trip_access(text);
@@ -333,6 +374,7 @@ declare
   trip_splits jsonb := '[]'::jsonb;
   trip_exchange_rates jsonb := '[]'::jsonb;
   trip_settlements jsonb := '[]'::jsonb;
+  closure_votes jsonb := '[]'::jsonb;
 begin
   if current_user_id is null then
     raise exception 'Sign in required';
@@ -361,7 +403,8 @@ begin
       'expenses', '[]'::jsonb,
       'splits', '[]'::jsonb,
       'settlements', '[]'::jsonb,
-      'exchangeRates', '[]'::jsonb
+      'exchangeRates', '[]'::jsonb,
+      'closureVotes', '[]'::jsonb
     );
   end if;
 
@@ -373,7 +416,8 @@ begin
       'expenses', '[]'::jsonb,
       'splits', '[]'::jsonb,
       'settlements', '[]'::jsonb,
-      'exchangeRates', '[]'::jsonb
+      'exchangeRates', '[]'::jsonb,
+      'closureVotes', '[]'::jsonb
     );
   end if;
 
@@ -418,6 +462,11 @@ begin
   from public.settlements s
   where s.trip_id = current_member.trip_id;
 
+  select coalesce(jsonb_agg(to_jsonb(v) order by v.approved_at asc), '[]'::jsonb)
+  into closure_votes
+  from public.trip_closure_votes v
+  where v.trip_id = current_member.trip_id;
+
   return jsonb_build_object(
     'trip', to_jsonb(current_trip),
     'member', to_jsonb(current_member) - 'access_token',
@@ -425,7 +474,8 @@ begin
     'expenses', trip_expenses,
     'splits', trip_splits,
     'settlements', trip_settlements,
-    'exchangeRates', trip_exchange_rates
+    'exchangeRates', trip_exchange_rates,
+    'closureVotes', closure_votes
   );
 end;
 $$;
@@ -441,6 +491,8 @@ as $$
     'trip_id', t.id,
     'trip_name', t.name,
     'base_currency', t.base_currency,
+    'trip_status', t.status,
+    'closed_at', t.closed_at,
     'display_name', m.display_name,
     'role', m.role,
     'status', m.status,
@@ -1621,6 +1673,634 @@ begin
 end;
 $$;
 
+create or replace function public.member_open_balance(member_id_input uuid)
+returns numeric
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select round(
+    coalesce((select sum(e.converted_amount) from public.expenses e where e.paid_by_member_id = member_id_input and e.deleted_at is null), 0)
+    - coalesce((select sum(s.amount_owed) from public.expense_splits s join public.expenses e on e.id = s.expense_id where s.member_id = member_id_input and e.deleted_at is null), 0)
+    + coalesce((select sum(st.amount) from public.settlements st where st.from_member_id = member_id_input and st.status = 'paid'), 0)
+    - coalesce((select sum(st.amount) from public.settlements st where st.to_member_id = member_id_input and st.status = 'paid'), 0),
+    2
+  );
+$$;
+
+create or replace function public.trip_approved_members_settled(trip_id_input uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select not exists (
+    select 1
+    from public.members m
+    where m.trip_id = trip_id_input
+      and m.status = 'approved'
+      and abs(public.member_open_balance(m.id)) > 0.01
+  );
+$$;
+
+create or replace function public.trip_approved_admin_count(trip_id_input uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*)::integer
+  from public.members m
+  where m.trip_id = trip_id_input
+    and m.status = 'approved'
+    and m.role = 'admin';
+$$;
+
+create or replace function public.prevent_member_change_unless_trip_active()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_trip public.trips;
+begin
+  if TG_OP = 'UPDATE'
+    and new.trip_id is not distinct from old.trip_id
+    and new.status is not distinct from old.status
+    and new.role is not distinct from old.role then
+    return new;
+  end if;
+
+  select * into target_trip from public.trips where id = new.trip_id;
+
+  if target_trip.status = 'closing' then
+    raise exception 'This trip is being closed. Cancel the close request before changing members.';
+  end if;
+
+  if target_trip.status = 'closed' then
+    raise exception 'This trip is closed.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists members_trip_lifecycle_guard on public.members;
+create trigger members_trip_lifecycle_guard
+before insert or update on public.members
+for each row
+execute function public.prevent_member_change_unless_trip_active();
+
+create or replace function public.prevent_expense_change_unless_trip_active()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_trip_id uuid;
+  target_trip public.trips;
+begin
+  if TG_OP = 'DELETE' then
+    target_trip_id := old.trip_id;
+  else
+    target_trip_id := new.trip_id;
+  end if;
+
+  select * into target_trip from public.trips where id = target_trip_id;
+
+  if target_trip.status = 'closing' then
+    raise exception 'This trip is being closed. Cancel the close request before changing expenses.';
+  end if;
+
+  if target_trip.status = 'closed' then
+    raise exception 'This trip is closed.';
+  end if;
+
+  if TG_OP = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists expenses_trip_lifecycle_guard on public.expenses;
+create trigger expenses_trip_lifecycle_guard
+before insert or update or delete on public.expenses
+for each row
+execute function public.prevent_expense_change_unless_trip_active();
+
+create or replace function public.prevent_exchange_rate_change_unless_trip_active()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_trip public.trips;
+begin
+  select * into target_trip from public.trips where id = new.trip_id;
+
+  if target_trip.status = 'closing' then
+    raise exception 'This trip is being closed. Cancel the close request before changing exchange rates.';
+  end if;
+
+  if target_trip.status = 'closed' then
+    raise exception 'This trip is closed.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists exchange_rates_trip_lifecycle_guard on public.exchange_rates;
+create trigger exchange_rates_trip_lifecycle_guard
+before insert or update on public.exchange_rates
+for each row
+execute function public.prevent_exchange_rate_change_unless_trip_active();
+
+create or replace function public.prevent_settlement_change_when_trip_closed()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_trip_id uuid;
+  target_trip public.trips;
+begin
+  if TG_OP = 'DELETE' then
+    target_trip_id := old.trip_id;
+  else
+    target_trip_id := new.trip_id;
+  end if;
+
+  select * into target_trip from public.trips where id = target_trip_id;
+
+  if target_trip.status = 'closed' then
+    raise exception 'This trip is closed.';
+  end if;
+
+  if TG_OP = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists settlements_trip_lifecycle_guard on public.settlements;
+create trigger settlements_trip_lifecycle_guard
+before insert or update or delete on public.settlements
+for each row
+execute function public.prevent_settlement_change_when_trip_closed();
+
+create or replace function public.promote_member_to_admin(member_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_member public.members;
+  target_trip public.trips;
+  admin_member public.members;
+begin
+  select * into target_member from public.members where id = member_id_input;
+
+  if target_member.id is null then
+    raise exception 'Member not found';
+  end if;
+
+  select * into target_trip from public.trips where id = target_member.trip_id;
+
+  if target_trip.status <> 'active' then
+    raise exception 'This trip is being closed. Cancel the close request before changing members.';
+  end if;
+
+  select *
+  into admin_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = target_member.trip_id
+    and role = 'admin'
+    and status = 'approved';
+
+  if admin_member.id is null then
+    raise exception 'Admin access required';
+  end if;
+
+  if target_member.status <> 'approved' then
+    raise exception 'Only approved members can be promoted to admin';
+  end if;
+
+  update public.members
+  set role = 'admin'
+  where id = member_id_input
+  returning * into target_member;
+
+  return to_jsonb(target_member) - 'access_token';
+end;
+$$;
+
+create or replace function public.demote_admin(member_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_member public.members;
+  target_trip public.trips;
+  admin_member public.members;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in required';
+  end if;
+
+  select * into target_member from public.members where id = member_id_input;
+
+  if target_member.id is null
+    or target_member.status <> 'approved'
+    or target_member.role <> 'admin' then
+    raise exception 'Only approved admins can be demoted.';
+  end if;
+
+  select * into target_trip from public.trips where id = target_member.trip_id;
+
+  if target_trip.status <> 'active' then
+    raise exception 'Admin roles cannot be changed while this trip is closing or closed.';
+  end if;
+
+  select *
+  into admin_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = target_member.trip_id
+    and role = 'admin'
+    and status = 'approved';
+
+  if admin_member.id is null then
+    raise exception 'Only admins can change admin roles.';
+  end if;
+
+  if admin_member.id = target_member.id then
+    raise exception 'You cannot remove your own admin role.';
+  end if;
+
+  if not exists (
+    select 1
+    from public.members m
+    where m.trip_id = target_member.trip_id
+      and m.status = 'approved'
+      and m.role = 'admin'
+      and m.id <> target_member.id
+  ) then
+    raise exception 'This trip needs at least one admin.';
+  end if;
+
+  update public.members
+  set role = 'member'
+  where id = member_id_input
+  returning * into target_member;
+
+  return public.load_auth_workspace(admin_member.id);
+end;
+$$;
+
+create or replace function public.leave_trip(member_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_member public.members;
+  target_trip public.trips;
+begin
+  select *
+  into target_member
+  from public.members
+  where id = member_id_input
+    and user_id = auth.uid();
+
+  if target_member.id is null then
+    raise exception 'You can only leave your own trip membership';
+  end if;
+
+  if target_member.status <> 'approved' then
+    raise exception 'Only approved members can leave a trip';
+  end if;
+
+  select * into target_trip from public.trips where id = target_member.trip_id;
+
+  if target_trip.status <> 'active' then
+    raise exception 'This trip is being closed. Cancel the close request before changing members.';
+  end if;
+
+  if abs(public.member_open_balance(target_member.id)) > 0.01 then
+    raise exception 'You still have an open balance. Settle up before leaving this trip.';
+  end if;
+
+  if target_member.role = 'admin'
+    and public.trip_approved_admin_count(target_member.trip_id) <= 1 then
+    raise exception 'This trip needs at least one admin. Promote another member before leaving.';
+  end if;
+
+  update public.members
+  set status = 'removed',
+      removed_at = now()
+  where id = member_id_input;
+
+  return jsonb_build_object(
+    'trip', null,
+    'member', to_jsonb(target_member) - 'access_token',
+    'members', '[]'::jsonb,
+    'expenses', '[]'::jsonb,
+    'splits', '[]'::jsonb,
+    'settlements', '[]'::jsonb,
+    'exchangeRates', '[]'::jsonb,
+    'closureVotes', '[]'::jsonb
+  );
+end;
+$$;
+
+create or replace function public.start_trip_closure(trip_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_trip public.trips;
+  admin_member public.members;
+begin
+  select * into current_trip from public.trips where id = trip_id_input;
+
+  if current_trip.id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if current_trip.status <> 'active' then
+    raise exception 'Trip close request can only be started for an active trip';
+  end if;
+
+  select *
+  into admin_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = trip_id_input
+    and role = 'admin'
+    and status = 'approved';
+
+  if admin_member.id is null then
+    raise exception 'Admin access required';
+  end if;
+
+  if not public.trip_approved_members_settled(trip_id_input) then
+    raise exception 'This trip cannot be closed until everyone is settled.';
+  end if;
+
+  update public.trips
+  set status = 'closing',
+      closed_at = null
+  where id = trip_id_input;
+
+  delete from public.trip_closure_votes where trip_id = trip_id_input;
+
+  insert into public.trip_closure_votes (trip_id, member_id, approved_at)
+  values (trip_id_input, admin_member.id, now())
+  on conflict (trip_id, member_id)
+  do update set approved_at = excluded.approved_at;
+
+  return public.load_auth_workspace(admin_member.id);
+end;
+$$;
+
+create or replace function public.approve_trip_closure(trip_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_trip public.trips;
+  caller_member public.members;
+  approved_count integer;
+  vote_count integer;
+begin
+  select * into current_trip from public.trips where id = trip_id_input;
+
+  if current_trip.id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if current_trip.status <> 'closing' then
+    raise exception 'Trip is not waiting for close approval';
+  end if;
+
+  select *
+  into caller_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = trip_id_input
+    and status = 'approved';
+
+  if caller_member.id is null then
+    raise exception 'Approved trip member access required';
+  end if;
+
+  insert into public.trip_closure_votes (trip_id, member_id, approved_at)
+  values (trip_id_input, caller_member.id, now())
+  on conflict (trip_id, member_id)
+  do update set approved_at = excluded.approved_at;
+
+  if not public.trip_approved_members_settled(trip_id_input) then
+    raise exception 'This trip cannot be closed until everyone is settled.';
+  end if;
+
+  select count(distinct m.id)
+  into approved_count
+  from public.members m
+  where m.trip_id = trip_id_input
+    and m.status = 'approved';
+
+  select count(distinct v.member_id)
+  into vote_count
+  from public.trip_closure_votes v
+  join public.members m on m.id = v.member_id
+  where v.trip_id = trip_id_input
+    and m.trip_id = trip_id_input
+    and m.status = 'approved';
+
+  if approved_count = vote_count then
+    update public.trips
+    set status = 'closed',
+        closed_at = now()
+    where id = trip_id_input;
+  end if;
+
+  return public.load_auth_workspace(caller_member.id);
+end;
+$$;
+
+create or replace function public.cancel_trip_closure(trip_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_trip public.trips;
+  admin_member public.members;
+begin
+  select * into current_trip from public.trips where id = trip_id_input;
+
+  if current_trip.id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if current_trip.status <> 'closing' then
+    raise exception 'Trip is not waiting for close approval';
+  end if;
+
+  select *
+  into admin_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = trip_id_input
+    and role = 'admin'
+    and status = 'approved';
+
+  if admin_member.id is null then
+    raise exception 'Admin access required';
+  end if;
+
+  update public.trips
+  set status = 'active',
+      closed_at = null
+  where id = trip_id_input;
+
+  delete from public.trip_closure_votes where trip_id = trip_id_input;
+
+  return public.load_auth_workspace(admin_member.id);
+end;
+$$;
+
+create or replace function public.regenerate_trip_invite_code(trip_id_input uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_trip public.trips;
+  admin_member public.members;
+  candidate_code text;
+begin
+  select * into current_trip from public.trips where id = trip_id_input;
+
+  if current_trip.id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if current_trip.status = 'closing' then
+    raise exception 'This trip is being closed. Cancel the close request before changing settings.';
+  end if;
+
+  if current_trip.status = 'closed' then
+    raise exception 'This trip is closed.';
+  end if;
+
+  select *
+  into admin_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = trip_id_input
+    and role = 'admin'
+    and status = 'approved';
+
+  if admin_member.id is null then
+    raise exception 'Admin access required';
+  end if;
+
+  loop
+    candidate_code := public.generate_invite_code();
+    exit when not exists (
+      select 1
+      from public.trips
+      where invite_code = candidate_code
+        and id <> trip_id_input
+    );
+  end loop;
+
+  update public.trips
+  set invite_code = candidate_code
+  where id = trip_id_input;
+
+  return public.load_auth_workspace(admin_member.id);
+end;
+$$;
+
+create or replace function public.update_trip_name(
+  trip_id_input uuid,
+  name_input text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_trip public.trips;
+  admin_member public.members;
+  normalized_name text;
+begin
+  normalized_name := trim(coalesce(name_input, ''));
+
+  if char_length(normalized_name) = 0 then
+    raise exception 'Trip name is required';
+  end if;
+
+  select * into current_trip from public.trips where id = trip_id_input;
+
+  if current_trip.id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if current_trip.status = 'closing' then
+    raise exception 'This trip is being closed. Cancel the close request before changing settings.';
+  end if;
+
+  if current_trip.status = 'closed' then
+    raise exception 'This trip is closed.';
+  end if;
+
+  select *
+  into admin_member
+  from public.members
+  where user_id = auth.uid()
+    and trip_id = trip_id_input
+    and role = 'admin'
+    and status = 'approved';
+
+  if admin_member.id is null then
+    raise exception 'Admin access required';
+  end if;
+
+  update public.trips
+  set name = normalized_name
+  where id = trip_id_input;
+
+  return public.load_auth_workspace(admin_member.id);
+end;
+$$;
+
 grant execute on function public.create_trip_with_admin(text, public.currency_code, text) to anon, authenticated;
 grant execute on function public.request_join_by_invite(text, text) to anon, authenticated;
 grant execute on function public.load_member_session(text) to anon, authenticated;
@@ -1640,3 +2320,14 @@ grant execute on function public.update_expense_with_splits(uuid, text, numeric,
 grant execute on function public.delete_expense(uuid) to authenticated;
 grant execute on function public.mark_settlement_paid(uuid, uuid, uuid, numeric) to authenticated;
 grant execute on function public.void_settlement(uuid, text) to authenticated;
+grant execute on function public.member_open_balance(uuid) to authenticated;
+grant execute on function public.trip_approved_members_settled(uuid) to authenticated;
+grant execute on function public.trip_approved_admin_count(uuid) to authenticated;
+grant execute on function public.promote_member_to_admin(uuid) to authenticated;
+grant execute on function public.demote_admin(uuid) to authenticated;
+grant execute on function public.leave_trip(uuid) to authenticated;
+grant execute on function public.start_trip_closure(uuid) to authenticated;
+grant execute on function public.approve_trip_closure(uuid) to authenticated;
+grant execute on function public.cancel_trip_closure(uuid) to authenticated;
+grant execute on function public.regenerate_trip_invite_code(uuid) to authenticated;
+grant execute on function public.update_trip_name(uuid, text) to authenticated;
