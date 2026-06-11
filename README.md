@@ -1,128 +1,39 @@
 # Parité
 
-Parité is a mobile-first Vite React app for private trip membership and shared expense splitting. Phase 4.5 uses Supabase Auth email/password accounts, Supabase trips/members, invite codes, admin approval, shared Supabase expenses, manual trip exchange-rate defaults, and per-member display currency preferences.
+Parité is a mobile-first trip expense splitting app built with React, Vite, TypeScript, and Supabase. It supports private trips, invite-code joins with admin approval, manual exchange rates, personal display currency, service-fee-aware expenses, smart splits, persisted settlements, safe trip lifecycle controls, and CSV export.
 
-Settlements are still local-only for now. Expenses, expense splits, and exchange-rate defaults are saved in Supabase.
+## Current Features
+
+- Supabase Auth email/password accounts.
+- Multi-trip workspace switching with `parite_active_member_id` restore.
+- Invite-code join flow with admin approval/rejection.
+- Member roles with admin promotion and demotion.
+- Safe leave, member removal, and close/archive trip flow.
+- Closed and closing trips are protected by server-side read-only guards.
+- Expenses in AED, CNY, and KZT with trip base-currency accounting.
+- Manual trip exchange rates used automatically for expense conversion.
+- Optional percentage service fee with fee-aware equal/custom splits.
+- Soft-delete expenses and settlement timestamp guard for protected edits/deletes.
+- Persisted settlements with receiver/admin confirmation, voiding, and paid/voided history.
+- Open balances reconcile paid settlements and ignore voided settlements.
+- Per-member display currency preference for read-only display conversion.
+- Expenses, balances, and settlements CSV export.
+- Full-width app-level error banner for blocking action errors.
 
 ## Prerequisites
 
-- macOS Terminal
-- Node.js and npm
-- A Supabase project
+- Node.js and npm.
+- A Supabase project.
+- A deployment target such as Vercel.
 
-Check your local versions:
+Check local versions:
 
 ```bash
 node --version
 npm --version
 ```
 
-## Supabase Setup
-
-You will use two different places:
-
-- **Mac Terminal**: run commands from this project folder.
-- **Supabase SQL Editor**: paste and run SQL inside the Supabase website.
-
-Do not paste a filename like `supabase/migrations/202606090001_phase1_contract_repair.sql` into Supabase. Supabase needs the actual SQL text inside that file.
-
-1. In Mac Terminal, go to this project folder:
-
-```bash
-cd /Users/nurtore.arynuruly/Projects/SaiHat
-```
-
-2. Copy the full migration SQL into your Mac clipboard.
-
-This command copies the **contents inside** the SQL file:
-
-```bash
-pbcopy < supabase/migrations/202606090001_phase1_contract_repair.sql
-```
-
-Do not paste this command into Supabase. Run it in Mac Terminal.
-
-Nothing obvious will print after this command. That is normal. It silently copies the SQL file contents. The copied text starts with:
-
-```sql
-create extension if not exists pgcrypto;
-```
-
-3. Open Supabase in your browser.
-4. Open your project.
-5. In the left sidebar, open **SQL Editor**.
-6. Click **New query**.
-7. Click inside the big SQL text box.
-8. Press `Command + V` to paste the SQL text that the `pbcopy` command copied.
-9. The pasted text should start with:
-
-```sql
-create extension if not exists pgcrypto;
-```
-
-10. Click **Run**.
-
-This full migration is intended for a fresh project or a full repair pass. If your existing Supabase project is already working and you only need Phase 4.5 display currency, use the incremental patch below instead.
-
-After running the migration, reload the Supabase API schema cache with a new SQL query:
-
-```sql
-notify pgrst, 'reload schema';
-```
-
-11. Confirm the required RPC functions exist by opening another **New query**, pasting this SQL, and clicking **Run**:
-
-```sql
-select
-  proname,
-  pg_get_function_arguments(oid) as args
-from pg_proc
-where pronamespace = 'public'::regnamespace
-and proname in (
-  'create_trip_with_admin',
-  'request_join_by_invite',
-  'load_auth_workspace',
-  'claim_legacy_member',
-  'load_member_session',
-  'approve_member',
-  'reject_member',
-  'remove_member',
-  'update_exchange_rate',
-  'update_member_display_currency',
-  'create_expense_with_splits',
-  'update_expense_with_splits',
-  'delete_expense'
-)
-order by proname;
-```
-
-12. Create `.env.local` in the project root:
-
-```bash
-VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-```
-
-Use the anon key only. Never put the service role key in the browser app.
-
-13. In Supabase, open **Authentication -> Providers -> Email**.
-
-For easiest local testing, turn off email confirmations. If confirmations stay on, signup may show a check-email message before the account can log in.
-
-## Phase 4.5 Incremental SQL Patch
-
-If your current Supabase database already has trips, members, expenses, splits, and exchange rates working, run only this patch for Phase 4.5.
-
-In Mac Terminal:
-
-```bash
-cd /Users/nurtore.arynuruly/Projects/SaiHat
-pbcopy < supabase/migrations/202606090002_phase45_display_currency.sql
-```
-
-Then paste into Supabase **SQL Editor -> New query** with `Command + V` and click **Run**. This patch adds `members.display_currency`, creates `update_member_display_currency(member_id_input, display_currency_input)`, grants it to authenticated users, and reloads the API schema cache.
-
-## Run Locally On Mac
+## Local Setup
 
 Install dependencies:
 
@@ -130,19 +41,135 @@ Install dependencies:
 npm install
 ```
 
-Start the local development server:
+Create `.env.local` in the project root:
+
+```bash
+VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+```
+
+Use the Supabase anon key only. Do not put `SUPABASE_SERVICE_ROLE_KEY`, database passwords, or any service credentials in frontend environment variables. Do not commit `.env.local`.
+
+Start the dev server:
 
 ```bash
 npm run dev
 ```
 
-Open:
+Open the URL printed by Vite, usually:
 
 ```txt
 http://localhost:3000
 ```
 
-## Local Verification
+## Supabase Setup
+
+Use the Supabase SQL Editor to run migration SQL. Paste the SQL file contents, not the filename.
+
+### Fresh Project Setup
+
+For a new Supabase project, run the current repair/fresh migration:
+
+```bash
+pbcopy < supabase/migrations/202606090001_phase1_contract_repair.sql
+```
+
+Paste into **Supabase -> SQL Editor -> New query** and run it. Then reload the PostgREST schema cache:
+
+```sql
+notify pgrst, 'reload schema';
+```
+
+`supabase/migrations/202606080001_initial_tripbalance.sql` is a legacy early baseline kept for history. Use `202606090001_phase1_contract_repair.sql` for a current fresh setup.
+
+### Existing Project Incremental Setup
+
+If your Supabase project already has the earlier Parité schema, run these incremental patches in order:
+
+1. `supabase/migrations/202606090002_phase45_display_currency.sql`
+2. `supabase/migrations/202606100001_phase47b_persisted_settlements.sql`
+3. `supabase/migrations/202606100002_phase47b2_settlement_expense_guard.sql`
+4. `supabase/migrations/202606100003_phase47c_safe_leave_close.sql`
+5. `supabase/migrations/202606100004_phase48b_service_fee.sql`
+6. `supabase/migrations/202606110001_phase49_admin_settings.sql`
+7. `supabase/migrations/202606110002_phase49a_admin_demotion.sql`
+
+Each patch is intended to be pasted into the Supabase SQL Editor and run once. Most DDL is idempotent where practical. After the final patch, run:
+
+```sql
+notify pgrst, 'reload schema';
+```
+
+### Required RPC Surface
+
+The current app expects these public RPCs to exist:
+
+- `create_trip_with_admin`
+- `request_join_by_invite`
+- `load_auth_workspace`
+- `list_my_workspaces`
+- `claim_legacy_member`
+- `load_member_session`
+- `approve_member`
+- `reject_member`
+- `remove_member`
+- `promote_member_to_admin`
+- `demote_admin`
+- `leave_trip`
+- `start_trip_closure`
+- `approve_trip_closure`
+- `cancel_trip_closure`
+- `regenerate_trip_invite_code`
+- `update_trip_name`
+- `update_exchange_rate`
+- `update_member_display_currency`
+- `create_expense_with_splits`
+- `update_expense_with_splits`
+- `delete_expense`
+- `mark_settlement_paid`
+- `void_settlement`
+
+You can inspect installed functions with:
+
+```sql
+select
+  proname,
+  pg_get_function_arguments(oid) as args
+from pg_proc
+where pronamespace = 'public'::regnamespace
+order by proname;
+```
+
+## Supabase Auth
+
+Open **Authentication -> Providers -> Email** in Supabase.
+
+For local testing, disabling email confirmations can make sign-up faster. For production, choose the email confirmation policy you want and test the sign-up flow with that setting enabled.
+
+## Vercel Deployment
+
+1. Connect the GitHub repository to Vercel.
+2. Add environment variables:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+3. Use build command:
+
+```bash
+npm run build
+```
+
+4. Use output directory:
+
+```txt
+dist
+```
+
+5. Deploy and open the production URL.
+6. Verify Supabase Auth redirect/site URL settings match your deployed domain if your auth configuration requires it.
+
+Do not add service role keys or database passwords to Vercel for this frontend app.
+
+## Verification Commands
 
 Run TypeScript checks:
 
@@ -159,96 +186,116 @@ npm run build
 Search for accidental direct table calls:
 
 ```bash
-rg -n "supabase\\.from\\(" src supabase
+rg -n "supabase\.from\(" src supabase
 ```
 
-Check localStorage usage:
+Search for old user-facing app names:
 
 ```bash
-rg -n "localStorage" src
+rg -n "SaiHat|Saihat|saihat|TripBalance|Trip Balance|Tripbalance|tripbalance|trip_balance" .
 ```
 
-The active app stores only a non-secret active member preference with `tripbalance_active_member_id`. The old `tripbalance_member_access_token` key may be read once to claim a legacy member, then removed.
+The only expected old-name hits are legacy localStorage key strings used for compatibility.
 
-## If Create Trip Fails
+## Local Storage And Session Notes
 
-First reload the Supabase API schema cache. In Supabase SQL Editor, run:
+The active app stores only a non-secret active member preference with:
+
+```txt
+parite_active_member_id
+```
+
+For compatibility, a legacy `tripbalance_active_member_id` value is copied once into `parite_active_member_id` when the new key is missing. The old `tripbalance_member_access_token` key may be read once to claim a legacy member, then removed. Supabase Auth session storage is not cleared by this migration behavior.
+
+## Security Notes
+
+- The frontend uses only the Supabase anon key.
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` in Vite, Vercel, browser code, logs, or screenshots.
+- Do not commit `.env.local`.
+- Do not place database passwords in frontend environment variables.
+- The frontend uses RPC-driven access and does not call `supabase.from(...)` directly.
+- Server-side RPC validation is the source of truth for permissions and trip lifecycle guards.
+
+## Post-Deployment Test Checklist
+
+### Auth and Workspaces
+
+- Sign up and log in.
+- Create a trip.
+- Join by invite from another account.
+- Admin approves or rejects the pending member.
+- Switch trips from the side menu.
+- Reload and confirm the active trip restores.
+- Log out and confirm the active workspace is cleared.
+
+### Members and Roles
+
+- Promote an approved member to admin.
+- Demote another admin back to member.
+- Confirm last-admin protections still block unsafe leave/remove/demotion.
+- Remove a member only when their open balance is zero.
+
+### Expenses
+
+- Add a no-fee expense.
+- Add a service-fee expense.
+- Add a non-base-currency expense with an exchange rate.
+- Use equal split.
+- Use smart custom split.
+- Use fee-aware custom split.
+- Edit title, amount, currency/rate, payer, date, notes, participants, and split method.
+- Delete an expense and confirm it disappears from normal lists, totals, search, and balances.
+- Confirm protected edit/delete after a later paid settlement shows a friendly error.
+
+### Balances and Settlements
+
+- Confirm open balances match expected expense splits.
+- Confirm a settlement as receiver or admin.
+- Refresh and confirm the paid settlement persists.
+- Void a settlement as receiver or admin.
+- Confirm voided settlements remain in history but do not affect open balances.
+
+### Lifecycle
+
+- Confirm leaving is blocked with an open balance.
+- Confirm member removal is blocked with an open balance.
+- Confirm trip closure is blocked until everyone is settled.
+- Start a close request.
+- Approve closure from all currently approved members.
+- Confirm closed trips remain visible and read-only.
+- Confirm there is no delete-trip action.
+
+### Display, Exchange, and Export
+
+- Set personal display currency and confirm base accounting values remain unchanged.
+- Confirm missing display conversion falls back safely.
+- Update exchange rates as admin while the trip is active.
+- Export expenses CSV.
+- Export balances CSV.
+- Export settlements CSV.
+- Confirm CSV values escape commas, quotes, and newlines.
+
+### UI Reliability
+
+- Confirm the app-level error banner is readable and dismissible.
+- Confirm no raw SQL/PostgREST/RPC details appear in user-facing errors.
+- Confirm mobile sticky header, bottom nav, modals, and sheets remain usable.
+- Confirm ErrorBoundary fallback shows a friendly reload option if a render crash occurs.
+
+## Troubleshooting
+
+If an RPC is missing or a new function signature is not visible to the frontend, reload the Supabase schema cache:
 
 ```sql
 notify pgrst, 'reload schema';
 ```
 
-Wait about 10 seconds, refresh the app, and try creating the trip again.
+Wait a few seconds, refresh the app, and retry the action.
 
-If it still fails, make sure you are logged in inside the app. Auth-based RPCs use `auth.uid()`, so calling them directly from SQL Editor is not the same as calling them from the logged-in app.
+If create/join/load fails after deployment, check:
 
-If the app fails after login, copy the visible app error message and check `.env.local`, then restart `npm run dev`.
-
-## If Joining Says The Name Is Already Used
-
-Display names must be unique inside a trip while the old member is pending, approved, or rejected. This prevents accidental duplicate member rows.
-
-If a person logs in with the same Supabase account, the app restores the same member row across browsers and devices. A different account cannot take the same display name while the old member is pending, approved, or rejected.
-
-Use a different display name, or ask the admin to remove the previous member entry and try again.
-
-## Phase 4 Manual Test Checklist
-
-- Sign up or log in as `admin@example.com`.
-- Create a new trip as admin with base currency `CNY`.
-- Refresh the browser and confirm the admin account and trip session restore.
-- Confirm the invite code persists after refresh.
-- Open another browser profile or private window.
-- Sign up or log in as `user2@example.com`.
-- Join the trip using the invite code as `User 2`.
-- Confirm the second user lands on the pending approval screen without seeing trip details.
-- Return as admin and approve, reject, or remove the pending member.
-- Confirm an approved member can refresh and keep access.
-- Log out and log back in as `user2@example.com`, then confirm the same member row loads.
-- In a third browser/private window, log in as `user2@example.com` and confirm it restores the same membership without creating a duplicate.
-- In a different account, try joining with display name `User 2` and confirm the app shows a friendly duplicate-name message.
-- Confirm rejected or removed users cannot access trip details.
-- Confirm the mobile-first layout is unchanged.
-- Add `100 CNY`; confirm the exchange-rate field is hidden or disabled as `1` and converted amount is `100 CNY`.
-- As admin, add `100 AED` with manual rate `1.95`; confirm converted amount is `195 CNY`.
-- Add another AED expense and confirm `1.95` is prefilled.
-- As admin, add `1000 KZT` with manual rate `0.014`; confirm converted amount is `14 CNY`.
-- Add another KZT expense and confirm `0.014` is prefilled.
-- Open the drawer, use **Exchange rates**, edit a default rate, and confirm the next expense uses the edited default.
-- Confirm non-admin members can enter manual rates on expenses but cannot edit trip default rates.
-- As the approved second user, add `Dinner`, `300 CNY`, paid by `User 2`, split equally with the admin.
-- Refresh the admin browser and confirm `Dinner` appears.
-- Confirm balances show the admin owes `User 2` `150 CNY`.
-- Edit and delete an expense as the creator or admin, then refresh another browser and confirm the change appears.
-- Confirm pending, rejected, and removed users cannot access the expense UI or exchange-rate settings.
-
-## Phase 4.5 Manual Test Checklist
-
-- Run the incremental Phase 4.5 SQL patch above, or rerun the full repair migration on a fresh project.
-- Confirm old member rows still work with `display_currency` as `null`.
-- Create trips with base currencies `AED`, `CNY`, and `KZT`; confirm the selected base currency is saved.
-- In a `CNY` trip, set default rates `AED -> CNY = 1.8` and `KZT -> CNY = 0.013`.
-- Open the drawer and set your display currency to `AED`.
-- Confirm `180 CNY` displays as approximately `100 AED` with `180 CNY base`.
-- Change your display currency to `KZT`.
-- Confirm `13 CNY` displays as approximately `1000 KZT`.
-- Change display currency back to **Same as trip base currency** and confirm amounts show in `CNY`.
-- Refresh or log out/in and confirm your display currency preference persists.
-- With two accounts in the same trip, set User A to `AED` and User B to `CNY`; confirm each user sees amounts in their own display currency.
-- Remove the needed display-rate row or use a missing pair and confirm the app shows base currency plus “Display rate unavailable. Showing CNY.”
-- Add an expense and confirm changing display currency does not change stored expense converted amounts or splits.
-- Confirm the page background, primary actions, and destructive actions use the requested palette.
-
-## Phase 4 Notes
-
-- Supabase Auth `auth.users.id` is the stable account identity.
-- `members.user_id` links a trip member row to an account.
-- `members.display_name` is only a trip nickname.
-- Old access tokens are kept only for legacy claiming and are no longer primary identity.
-- Trips, members, expenses, expense splits, exchange-rate defaults, and member display-currency preferences are persisted in Supabase.
-- Direct table reads/writes are not used by the frontend.
-- Exchange rates are manual only. No automatic exchange-rate API is used.
-- Admin-entered non-base expense rates update the trip default; non-admin expense rates apply only to that expense.
-- `members.display_currency` is a per-trip membership preference. It does not change trip base currency or stored accounting values.
-- Settlements are local-only and are not saved to Supabase yet.
-- Payment flows and receipt scanning are not implemented yet.
+- Vercel env vars are set and redeployed.
+- `.env.local` is present for local development.
+- Supabase Auth settings allow your test flow.
+- The current migration path has been applied.
+- The browser is logged in when calling auth-required RPCs.

@@ -241,7 +241,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                       className="min-h-11 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-slate-950 font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      {busySettlementKey === settlementKey ? 'Saving...' : confirmLabel}
+                      {busySettlementKey === settlementKey ? 'Confirming...' : confirmLabel}
                     </button>
                   ) : (
                     <p className="text-xs text-slate-500 leading-normal">

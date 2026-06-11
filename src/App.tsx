@@ -51,8 +51,13 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
+import {
+  exportBalancesCsv,
+  exportExpensesCsv,
+  exportSettlementsCsv,
+} from './lib/csvExport';
 
-const MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
+const LEGACY_MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
 const LEGACY_ACTIVE_MEMBER_ID_KEY = 'tripbalance_active_member_id';
 const ACTIVE_MEMBER_ID_KEY = 'parite_active_member_id';
 
@@ -88,6 +93,7 @@ export default function App() {
 
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const [exportBusy, setExportBusy] = useState<'expenses' | 'balances' | 'settlements' | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -129,7 +135,7 @@ export default function App() {
   }, [activeTrip?.id, lastRenderedTripId]);
 
   const clearAccessToken = () => {
-    localStorage.removeItem(MEMBER_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_MEMBER_ACCESS_TOKEN_KEY);
   };
 
   const getActiveMemberId = () => {
@@ -211,7 +217,7 @@ export default function App() {
   }, []);
 
   const claimLegacyAccessIfPresent = useCallback(async (): Promise<PhaseOneWorkspace | null> => {
-    const legacyAccessToken = localStorage.getItem(MEMBER_ACCESS_TOKEN_KEY);
+    const legacyAccessToken = localStorage.getItem(LEGACY_MEMBER_ACCESS_TOKEN_KEY);
     if (!legacyAccessToken) return null;
 
     try {
@@ -481,6 +487,49 @@ export default function App() {
       setActionErrorFromUnknown(error, 'Could not remove admin permissions.');
       throw error;
     }
+  };
+
+  const getExportContext = () => {
+    if (!activeTrip || !currentMember || currentMember.status !== 'approved') {
+      throw new Error('Approved trip access is required to export CSV files.');
+    }
+
+    return {
+      trip: activeTrip,
+      currentMember,
+      members: tripMembers,
+      expenses: tripExpenses,
+      splits: tripSplits,
+      settlements: tripSettlements,
+      exchangeRates: tripExchangeRates,
+    };
+  };
+
+  const runExportAction = (exportType: 'expenses' | 'balances' | 'settlements', exportAction: () => void, fallback: string) => {
+    if (exportBusy) return;
+
+    setActionError(null);
+    setExportBusy(exportType);
+    try {
+      exportAction();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, fallback);
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
+  const handleExportExpensesCsv = () => {
+    runExportAction('expenses', () => exportExpensesCsv(getExportContext()), 'Could not export expenses CSV.');
+  };
+
+  const handleExportBalancesCsv = () => {
+    runExportAction('balances', () => exportBalancesCsv(getExportContext()), 'Could not export balances CSV.');
+  };
+
+  const handleExportSettlementsCsv = () => {
+    runExportAction('settlements', () => exportSettlementsCsv(getExportContext()), 'Could not export settlements CSV.');
   };
 
   const handleLeaveTrip = async () => {
@@ -843,7 +892,7 @@ export default function App() {
           <Compass className="w-8 h-8 text-white stroke-[2.5]" />
         </div>
         <h1 className="text-3xl font-extrabold font-display text-white tracking-tight leading-none uppercase">
-          TripBalance
+          Parité
         </h1>
         <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
           Sign in to keep your trip access across browsers and devices.
@@ -1062,7 +1111,7 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:py-6 items-center select-none font-sans overflow-hidden">
-      <div className="tripbalance-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
+      <div className="parite-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
         <div className="bg-[var(--color-background)] text-slate-700 text-[10px] font-mono px-6 py-1.5 shrink-0 flex justify-between select-none items-center border-b border-slate-300/70">
           <span>17:10 pm</span>
           <div className="w-24 h-4 bg-[#050607] rounded-full border border-slate-905 mx-auto hidden md:block" />
@@ -1110,6 +1159,10 @@ export default function App() {
               onStartTripClosure={handleStartTripClosure}
               onApproveTripClosure={handleApproveTripClosure}
               onCancelTripClosure={handleCancelTripClosure}
+              onExportExpensesCsv={handleExportExpensesCsv}
+              onExportBalancesCsv={handleExportBalancesCsv}
+              onExportSettlementsCsv={handleExportSettlementsCsv}
+              exportBusy={exportBusy}
               onActionError={setActionError}
               onLogout={handleLogout}
             />
@@ -1136,7 +1189,7 @@ export default function App() {
           )}
 
           {isSupabaseConfigured && isBootstrapping && renderCenteredMessage(
-            'Loading SaiHat',
+            'Loading Parité',
             'Restoring your account session.'
           )}
 
@@ -1216,7 +1269,7 @@ export default function App() {
                       required
                       value={displayNameInput}
                       onChange={event => setDisplayNameInput(event.target.value)}
-                      placeholder="e.g. Aryn"
+                      placeholder="e.g. Qotaqbas"
                       className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
@@ -1277,7 +1330,7 @@ export default function App() {
                     id="input-create-trip-name"
                     value={newTripName}
                     onChange={event => setNewTripName(event.target.value)}
-                    placeholder="e.g. Graduation Trip"
+                    placeholder="e.g. Zaysan Trip"
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -1292,7 +1345,7 @@ export default function App() {
                     id="input-create-admin-name"
                     value={newTripAdminName}
                     onChange={event => setNewTripAdminName(event.target.value)}
-                    placeholder="e.g. Aryn"
+                    placeholder="e.g. Qotaqbas"
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -1307,8 +1360,8 @@ export default function App() {
                     onChange={event => setNewTripBaseCurrency(event.target.value as Currency)}
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-200 focus:border-indigo-500 focus:outline-none"
                   >
-                    <option value="CNY">CNY (Chinese Yuan)</option>
                     <option value="AED">AED (Emirati Dirham)</option>
+                    <option value="CNY">CNY (Chinese Yuan)</option>
                     <option value="KZT">KZT (Kazakhstani Tenge)</option>
                   </select>
                   <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
@@ -1407,7 +1460,7 @@ export default function App() {
 
               {!actionError && isWorkspaceLoading && (
                 <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400 flex items-start gap-2">
-                  <span className="flex-1">Syncing latest trip data...</span>
+                  <span className="flex-1">Loading the latest trip data...</span>
                 </div>
               )}
 
