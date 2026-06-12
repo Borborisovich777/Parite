@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Beta Access - Parite</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; background: #121418; color: #e5e7eb; }
+      main { min-height: 100vh; padding: 32px 20px; box-sizing: border-box; }
+      .wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 24px; }
+      .card { background: #1a1d23; border: 1px solid #1f2937; border-radius: 28px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,.22); }
+      a { color: #a5b4fc; text-decoration: none; font-weight: 700; }
+      a:hover { color: #c7d2fe; }
+      .eyebrow { color: #64748b; font-size: 12px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; margin: 0 0 12px; }
+      h1 { margin: 0; font-size: clamp(32px, 8vw, 56px); line-height: .95; letter-spacing: -0.04em; color: #fff; }
+      h2 { margin: 0 0 8px; color: #fff; font-size: 18px; }
+      p, li { color: #cbd5e1; line-height: 1.7; font-size: 14px; }
+      ul { margin: 12px 0 0; padding-left: 22px; }
+      footer { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="wrap">
+        <header class="card">
+          <a href="/">Parite</a>
+          <p class="eyebrow">Beta</p>
+          <h1>Beta Access</h1>
+          <p>Parite is being prepared for a small free deployment. The recommended launch model is invite-only access for up to 20 users.</p>
+          <p>Last updated: June 12, 2026</p>
+        </header>
+        <section class="card">
+          <h2>Who should use the beta</h2>
+          <p>The beta is intended for a small group of trusted testers who need trip or group expense tracking and can report issues clearly.</p>
+        </section>
+        <section class="card">
+          <h2>Safe launch model</h2>
+          <p>Keep signup controlled through Supabase Auth settings, invite codes, and admin approval. Production should deploy only from the main branch after pull request review.</p>
+          <ul>
+            <li>GitHub stores the source repository.</li>
+            <li>Cloudflare Pages hosts the frontend.</li>
+            <li>Cloudflare preview deployments are used for pull request review.</li>
+            <li>Supabase stores auth and trip data.</li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>Free-tier discipline</h2>
+          <p>Avoid background polling, excessive API refreshes, oversized assets, and unnecessary server work. A 20-user beta should remain within free-tier limits when usage is modest.</p>
+        </section>
+        <section class="card">
+          <h2>Before inviting users</h2>
+          <p>Verify signup, login, trip creation, invite-code join, admin approval, expense creation, settlement confirmation, CSV export, mobile layout, and error handling on the Cloudflare preview URL.</p>
+        </section>
+        <footer>
+          <a href="/">App</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="/beta-access/">Beta Access</a>
+        </footer>
+      </div>
+    </main>
+  </body>
+</html>
