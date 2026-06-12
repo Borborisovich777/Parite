@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BottomNav, TabType } from './components/BottomNav';
 import { ExpensesTab } from './components/ExpensesTab';
 import { BalancesTab } from './components/BalancesTab';
@@ -6,6 +6,7 @@ import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
+import { LandingPage } from './components/LandingPage';
 import { Currency, ExpenseFeeInput, ExpenseSplitInput } from './types';
 import { User } from '@supabase/supabase-js';
 import {
@@ -74,6 +75,8 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const authCardRef = useRef<HTMLElement | null>(null);
+  const authEmailInputRef = useRef<HTMLInputElement | null>(null);
 
   const [inviteInput, setInviteInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
@@ -885,103 +888,153 @@ export default function App() {
     </div>
   );
 
-  const renderAuthScreen = () => (
-    <div className="px-5 py-8 flex flex-col gap-6 flex-1 justify-center animate-fade-in bg-[#121418]">
-      <div className="text-center">
-        <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-md mb-3.5 accent-glow">
-          <Compass className="w-8 h-8 text-white stroke-[2.5]" />
-        </div>
-        <h1 className="text-3xl font-extrabold font-display text-white tracking-tight leading-none uppercase">
-          Parité
-        </h1>
-        <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
-          Sign in to keep your trip access across browsers and devices.
-        </p>
-      </div>
+  const renderAuthCard = () => {
+    const authFeedbackId = authError ? 'auth-error-message' : authMessage ? 'auth-status-message' : undefined;
 
-      <form onSubmit={handleAuthSubmit} className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-1.5 bg-[#121418] border border-slate-800 p-1 rounded-2xl">
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode('login');
-              setAuthError(null);
-              setAuthMessage(null);
-            }}
-            className={`min-h-10 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              authMode === 'login' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode('signup');
-              setAuthError(null);
-              setAuthMessage(null);
-            }}
-            className={`min-h-10 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              authMode === 'signup' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            Sign up
-          </button>
-        </div>
-
-        {authError && (
-          <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug">
-            <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{authError}</span>
-          </div>
-        )}
-
-        {authMessage && (
-          <div className="bg-indigo-950/30 border border-indigo-900/30 text-indigo-200 p-2.5 rounded-xl text-[11px] leading-snug">
-            {authMessage}
-          </div>
-        )}
-
-        <div className="flex flex-col gap-3">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              Email *
-            </label>
-            <input
-              type="email"
-              required
-              value={authEmail}
-              onChange={event => setAuthEmail(event.target.value)}
-              placeholder="you@example.com"
-              className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              Password *
-            </label>
-            <input
-              type="password"
-              required
-              value={authPassword}
-              onChange={event => setAuthPassword(event.target.value)}
-              placeholder="At least 6 characters"
-              className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <button
-          type="submit"
-          disabled={isAuthSubmitting}
-          className="w-full bg-indigo-600 disabled:opacity-60 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 cursor-pointer"
+    return (
+      <section
+        ref={authCardRef}
+        id="auth-card"
+        aria-labelledby="auth-card-title"
+        className="scroll-mt-24"
+      >
+        <form
+          id="form-auth"
+          onSubmit={handleAuthSubmit}
+          aria-labelledby="auth-card-title"
+          aria-describedby={authFeedbackId}
+          className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4"
         >
-          {isAuthSubmitting ? 'Please wait...' : authMode === 'signup' ? 'Create Account' : 'Log In'}
-        </button>
-      </form>
-    </div>
-  );
+          <div className="border-b border-slate-800 pb-3">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Parité account
+            </p>
+            <h2 id="auth-card-title" className="text-xl font-bold font-display text-white tracking-tight mt-1">
+              {authMode === 'signup' ? 'Create your account' : 'Log in to continue'}
+            </h2>
+            <p className="text-xs text-slate-500 font-medium mt-2 leading-relaxed">
+              Sign in to keep your trip access across browsers and devices.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5 bg-[#121418] border border-slate-800 p-1 rounded-2xl">
+            <button
+              type="button"
+              id="tab-auth-login"
+              aria-pressed={authMode === 'login'}
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError(null);
+                setAuthMessage(null);
+              }}
+              className={`min-h-10 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                authMode === 'login' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              id="tab-auth-signup"
+              aria-pressed={authMode === 'signup'}
+              onClick={() => {
+                setAuthMode('signup');
+                setAuthError(null);
+                setAuthMessage(null);
+              }}
+              className={`min-h-10 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                authMode === 'signup' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              Sign up
+            </button>
+          </div>
+
+          {authError && (
+            <div
+              id="auth-error-message"
+              role="alert"
+              className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug"
+            >
+              <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {authMessage && (
+            <div
+              id="auth-status-message"
+              role="status"
+              className="bg-indigo-950/30 border border-indigo-900/30 text-indigo-200 p-2.5 rounded-xl text-[11px] leading-snug"
+            >
+              {authMessage}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3">
+            <div>
+              <label htmlFor="input-auth-email" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                Email *
+              </label>
+              <input
+                ref={authEmailInputRef}
+                id="input-auth-email"
+                type="email"
+                required
+                autoComplete="email"
+                value={authEmail}
+                onChange={event => setAuthEmail(event.target.value)}
+                placeholder="you@example.com"
+                aria-invalid={Boolean(authError)}
+                aria-describedby={authFeedbackId}
+                className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="input-auth-password" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                Password *
+              </label>
+              <input
+                id="input-auth-password"
+                type="password"
+                required
+                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                value={authPassword}
+                onChange={event => setAuthPassword(event.target.value)}
+                placeholder="At least 6 characters"
+                aria-invalid={Boolean(authError)}
+                aria-describedby={authFeedbackId}
+                className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            id="btn-auth-submit"
+            disabled={isAuthSubmitting}
+            className="w-full bg-indigo-600 disabled:opacity-60 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 cursor-pointer"
+          >
+            {isAuthSubmitting ? 'Please wait...' : authMode === 'signup' ? 'Create Account' : 'Log In'}
+          </button>
+        </form>
+      </section>
+    );
+  };
+
+  const handleLandingGetStartedClick = () => {
+    setAuthMode('signup');
+    setAuthError(null);
+    setAuthMessage(null);
+
+    window.requestAnimationFrame(() => {
+      authCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.setTimeout(() => {
+        authEmailInputRef.current?.focus({ preventScroll: true });
+      }, 120);
+    });
+  };
 
   const renderAccountStrip = () => authUser ? (
     <div className="w-full max-w-xs mx-auto rounded-2xl bg-[#1a1d23] border border-slate-800 px-3 py-2 flex items-center justify-between gap-3">
@@ -1109,6 +1162,15 @@ export default function App() {
     </div>
   );
 
+  if (isSupabaseConfigured && !isBootstrapping && !authUser) {
+    return (
+      <LandingPage
+        authCard={renderAuthCard()}
+        onGetStartedClick={handleLandingGetStartedClick}
+      />
+    );
+  }
+
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:py-6 items-center select-none font-sans overflow-hidden">
       <div className="parite-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
@@ -1197,8 +1259,6 @@ export default function App() {
             'Could not restore trip access',
             appError
           )}
-
-          {isSupabaseConfigured && !isBootstrapping && !authUser && renderAuthScreen()}
 
           {isSupabaseConfigured && !isBootstrapping && authUser && !activeTrip && !currentMember && !isCreatingTripView && !isJoiningTripView && renderWorkspaceSelection()}
 
