@@ -779,6 +779,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <option value="AED">AED</option>
                       <option value="CNY">CNY</option>
                       <option value="KZT">KZT</option>
+                      <option value="USD">USD</option>
                     </select>
                   </div>
                 </div>

@@ -1363,6 +1363,7 @@ export default function App() {
                     <option value="AED">AED (Emirati Dirham)</option>
                     <option value="CNY">CNY (Chinese Yuan)</option>
                     <option value="KZT">KZT (Kazakhstani Tenge)</option>
+                    <option value="USD">USD (US Dollar)</option>
                   </select>
                   <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
                     Trip base currency is used for calculations. You can still view your personal amounts in another currency later.

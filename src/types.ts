@@ -1,4 +1,4 @@
-export type Currency = 'AED' | 'CNY' | 'KZT';
+export type Currency = 'AED' | 'CNY' | 'KZT' | 'USD';
 export type TripStatus = 'active' | 'closing' | 'closed';
 
 export interface Trip {
