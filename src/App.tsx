@@ -1112,17 +1112,6 @@ export default function App() {
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:py-6 items-center select-none font-sans overflow-hidden">
       <div className="parite-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
-        <div className="bg-[var(--color-background)] text-slate-700 text-[10px] font-mono px-6 py-1.5 shrink-0 flex justify-between select-none items-center border-b border-slate-300/70">
-          <span>17:10 pm</span>
-          <div className="w-24 h-4 bg-[#050607] rounded-full border border-slate-905 mx-auto hidden md:block" />
-          <div className="flex gap-1.5 items-center">
-            <span>5G</span>
-            <div className="w-5 h-2.5 bg-slate-800 rounded-2xs border border-slate-900 p-0.5 flex">
-              <div className="bg-indigo-500 flex-1 rounded-3xs" />
-            </div>
-          </div>
-        </div>
-
         {activeTrip && (
           <>
             <AppHeader
