@@ -10,7 +10,7 @@ Parité is a mobile-first trip expense splitting app built with React, Vite, Typ
 - Member roles with admin promotion and demotion.
 - Safe leave, member removal, and close/archive trip flow.
 - Closed and closing trips are protected by server-side read-only guards.
-- Expenses in AED, CNY, and KZT with trip base-currency accounting.
+- Expenses in AED, CNY, KZT, and USD with trip base-currency accounting.
 - Manual trip exchange rates used automatically for expense conversion.
 - Optional percentage service fee with fee-aware equal/custom splits.
 - Soft-delete expenses and settlement timestamp guard for protected edits/deletes.
@@ -93,6 +93,7 @@ If your Supabase project already has the earlier Parité schema, run these incre
 5. `supabase/migrations/202606100004_phase48b_service_fee.sql`
 6. `supabase/migrations/202606110001_phase49_admin_settings.sql`
 7. `supabase/migrations/202606110002_phase49a_admin_demotion.sql`
+8. `supabase/migrations/202606110003_phase53_usd_currency.sql`
 
 Each patch is intended to be pasted into the Supabase SQL Editor and run once. Most DDL is idempotent where practical. After the final patch, run:
 

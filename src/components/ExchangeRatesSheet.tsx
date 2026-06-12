@@ -4,7 +4,7 @@ import { Currency, ExchangeRate, Member, Trip } from '../types';
 import { isDecimalInputValue, parsePositiveDecimal } from '../lib/decimalInput';
 import { getTripExchangeRate } from '../lib/exchangeRates';
 
-const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT'];
+const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT', 'USD'];
 
 interface ExchangeRatesSheetProps {
   isOpen: boolean;
