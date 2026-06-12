@@ -591,7 +591,7 @@ export function calculateSettlementRecommendations(
   }));
 
   // Split into debtors and creditors
-  // We use a safe margin of 0.01 CNY to ignore floating-point rounding dust near zero
+  // We use a safe margin of 0.01 in the trip base currency to ignore floating-point rounding dust near zero
   const debtors = adjustedBalances
     .filter(m => m.balance < -0.01)
     .map(m => ({ ...m }));

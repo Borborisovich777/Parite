@@ -16,7 +16,7 @@ export function normalizeCurrency(value: unknown): string {
 
 export function toCurrency(value: unknown): Currency {
   const normalized = normalizeCurrency(value);
-  if (normalized === 'AED' || normalized === 'CNY' || normalized === 'KZT') {
+  if (normalized === 'AED' || normalized === 'CNY' || normalized === 'KZT' || normalized === 'USD') {
     return normalized;
   }
   return 'CNY';

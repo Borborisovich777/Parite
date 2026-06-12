@@ -17,7 +17,7 @@ import {
 import { Currency, Member, Trip } from '../types';
 import { WorkspaceSummary } from '../lib/tripRepository';
 
-const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT'];
+const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT', 'USD'];
 type ExportType = 'expenses' | 'balances' | 'settlements';
 type LifecycleAction = 'leave' | 'start-close' | 'approve-close' | 'cancel-close';
 

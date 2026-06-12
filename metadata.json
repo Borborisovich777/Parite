@@ -1,5 +1,5 @@
 {
   "name": "Parité",
-  "description": "A mobile-first trip expense splitting app with multi-currency support (AED, CNY, KZT).",
+  "description": "A mobile-first trip expense splitting app with multi-currency support (AED, CNY, KZT, and USD).",
   "requestFramePermissions": []
 }

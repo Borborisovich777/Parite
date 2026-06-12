@@ -1,10 +1,12 @@
 create extension if not exists pgcrypto;
 
 do $$ begin
-  create type public.currency_code as enum ('AED', 'CNY', 'KZT');
+  create type public.currency_code as enum ('AED', 'CNY', 'KZT', 'USD');
 exception
   when duplicate_object then null;
 end $$;
+
+alter type public.currency_code add value if not exists 'USD';
 
 do $$ begin
   create type public.member_role as enum ('admin', 'member');
@@ -35,7 +37,7 @@ create table if not exists public.members (
   display_name text not null check (char_length(trim(display_name)) > 0),
   role public.member_role not null default 'member',
   status public.member_status not null default 'pending',
-  display_currency text check (display_currency in ('AED', 'CNY', 'KZT')),
+  display_currency text check (display_currency in ('AED', 'CNY', 'KZT', 'USD')),
   access_token text not null unique,
   created_at timestamptz not null default now(),
   approved_at timestamptz,
@@ -151,7 +153,7 @@ end $$;
 update public.trips
 set base_currency = 'CNY'
 where base_currency is null
-   or upper(base_currency::text) not in ('AED', 'CNY', 'KZT');
+   or upper(base_currency::text) not in ('AED', 'CNY', 'KZT', 'USD');
 
 alter table public.trips alter column base_currency drop default;
 
@@ -167,7 +169,7 @@ alter table public.members add column if not exists user_id uuid references auth
 alter table public.members add column if not exists display_name text;
 alter table public.members add column if not exists role public.member_role not null default 'member';
 alter table public.members add column if not exists status public.member_status not null default 'pending';
-alter table public.members add column if not exists display_currency text check (display_currency in ('AED', 'CNY', 'KZT'));
+alter table public.members add column if not exists display_currency text check (display_currency in ('AED', 'CNY', 'KZT', 'USD'));
 alter table public.members add column if not exists access_token text;
 alter table public.members add column if not exists created_at timestamptz not null default now();
 alter table public.members add column if not exists approved_at timestamptz;
@@ -1087,7 +1089,7 @@ begin
   normalized_currency := nullif(upper(trim(coalesce(display_currency_input, ''))), '');
 
   if normalized_currency is not null
-     and normalized_currency not in ('AED', 'CNY', 'KZT') then
+     and normalized_currency not in ('AED', 'CNY', 'KZT', 'USD') then
     raise exception 'Invalid display currency';
   end if;
 
