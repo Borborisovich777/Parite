@@ -14,10 +14,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Currency, Member, Trip } from '../types';
+import { Currency, Member, SUPPORTED_CURRENCIES, Trip } from '../types';
 import { WorkspaceSummary } from '../lib/tripRepository';
 
-const CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT', 'USD'];
 type ExportType = 'expenses' | 'balances' | 'settlements';
 type LifecycleAction = 'leave' | 'start-close' | 'approve-close' | 'cancel-close';
 
@@ -355,7 +354,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     Admin settings
                   </span>
                   <span className="block text-xs text-slate-400 mt-1">
-                    Invite, members, rates, and lifecycle
+                    Invite, members, and lifecycle
                   </span>
                 </span>
                 <ShieldCheck className="w-4 h-4 text-indigo-300" />
@@ -472,19 +471,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({
 
                       <button
                         type="button"
-                        id="btn-menu-exchange-rates"
-                        onClick={() => {
-                          onExchangeRates();
-                          onClose();
-                        }}
-                        className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
-                      >
-                        <Settings className="w-4 h-4 text-indigo-300" />
-                        Exchange rates
-                      </button>
-
-                      <button
-                        type="button"
                         id="btn-start-trip-closure"
                         onClick={() => {
                           if (confirm('Start closing this trip? Everyone must approve before it becomes read-only.')) {
@@ -516,38 +502,58 @@ export const SideMenu: React.FC<SideMenuProps> = ({
           )}
 
           <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
-            <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">
-              Display currency
-            </label>
-            <select
-              value={displayCurrencyInput}
-              onChange={event => setDisplayCurrencyInput(event.target.value as Currency | '')}
-              disabled={!currentMember || isSavingDisplayCurrency}
-              className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-100 px-3 py-2 text-sm font-semibold focus:border-[var(--color-positive)] focus:outline-none disabled:opacity-60"
-            >
-              <option value="">Same as trip base currency</option>
-              {CURRENCIES.map(currency => (
-                <option key={currency} value={currency}>
-                  {currency}
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-              Only changes how amounts are shown to you. Trip accounting stays in {trip.base_currency}.
+            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-3">
+              General
             </p>
-            {displayCurrencyError && (
-              <p className="text-[11px] text-[var(--color-negative)] mt-2 leading-relaxed">
-                {displayCurrencyError}
-              </p>
+            {isApprovedMember && (
+              <button
+                type="button"
+                id="btn-menu-exchange-rates"
+                onClick={() => {
+                  onExchangeRates();
+                  onClose();
+                }}
+                className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+              >
+                <Settings className="w-4 h-4 text-indigo-300" />
+                Exchange rates
+              </button>
             )}
-            <button
-              type="button"
-              onClick={handleSaveDisplayCurrency}
-              disabled={!currentMember || isSavingDisplayCurrency || displayCurrencyInput === (currentMember?.display_currency ?? '')}
-              className="mt-3 w-full min-h-10 rounded-2xl bg-[var(--color-positive)] text-slate-950 px-3 py-2 font-bold text-xs cursor-pointer disabled:opacity-60"
-            >
-              {isSavingDisplayCurrency ? 'Saving...' : 'Save display currency'}
-            </button>
+
+            <div className={isApprovedMember ? 'mt-4 pt-4 border-t border-slate-800' : ''}>
+              <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">
+                Display currency
+              </label>
+              <select
+                value={displayCurrencyInput}
+                onChange={event => setDisplayCurrencyInput(event.target.value as Currency | '')}
+                disabled={!currentMember || isSavingDisplayCurrency}
+                className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-100 px-3 py-2 text-sm font-semibold focus:border-[var(--color-positive)] focus:outline-none disabled:opacity-60"
+              >
+                <option value="">Same as trip base currency</option>
+                {SUPPORTED_CURRENCIES.map(currency => (
+                  <option key={currency} value={currency}>
+                    {currency}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                Only changes how amounts are shown to you. Trip accounting stays in {trip.base_currency}.
+              </p>
+              {displayCurrencyError && (
+                <p className="text-[11px] text-[var(--color-negative)] mt-2 leading-relaxed">
+                  {displayCurrencyError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveDisplayCurrency}
+                disabled={!currentMember || isSavingDisplayCurrency || displayCurrencyInput === (currentMember?.display_currency ?? '')}
+                className="mt-3 w-full min-h-10 rounded-2xl bg-[var(--color-positive)] text-slate-950 px-3 py-2 font-bold text-xs cursor-pointer disabled:opacity-60"
+              >
+                {isSavingDisplayCurrency ? 'Saving...' : 'Save display currency'}
+              </button>
+            </div>
           </section>
 
           {isApprovedMember && (
