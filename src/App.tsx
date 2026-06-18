@@ -6,7 +6,7 @@ import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
-import { Currency, ExpenseFeeInput, ExpenseSplitInput } from './types';
+import { Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
 import {
   isSupabaseConfigured,
@@ -636,6 +636,18 @@ export default function App() {
       throw new Error('Trip access is not loaded.');
     }
 
+    if (!currentMember || currentMember.role !== 'admin' || currentMember.status !== 'approved') {
+      const message = 'Only trip admins can update exchange rates.';
+      setActionError(message);
+      throw new Error(message);
+    }
+
+    if ((activeTrip.status ?? 'active') !== 'active') {
+      const message = 'This trip is read-only. Exchange rates can still be viewed.';
+      setActionError(message);
+      throw new Error(message);
+    }
+
     try {
       const nextWorkspace = await updateExchangeRate(activeTrip.id, fromCurrency, toCurrency, rate);
       applyWorkspace(nextWorkspace);
@@ -1168,10 +1180,12 @@ export default function App() {
             />
             {currentMember?.status === 'approved' && (
               <ExchangeRatesSheet
-                isOpen={isExchangeRatesOpen && isTripActive}
+                isOpen={isExchangeRatesOpen}
                 trip={activeTrip}
                 currentMember={currentMember}
+                members={tripMembers}
                 exchangeRates={tripExchangeRates}
+                canEdit={currentMember.role === 'admin' && isTripActive}
                 onClose={() => setIsExchangeRatesOpen(false)}
                 onUpdateRate={handleUpdateExchangeRate}
                 onActionError={setActionError}
@@ -1360,10 +1374,11 @@ export default function App() {
                     onChange={event => setNewTripBaseCurrency(event.target.value as Currency)}
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-200 focus:border-indigo-500 focus:outline-none"
                   >
-                    <option value="AED">AED (Emirati Dirham)</option>
-                    <option value="CNY">CNY (Chinese Yuan)</option>
-                    <option value="KZT">KZT (Kazakhstani Tenge)</option>
-                    <option value="USD">USD (US Dollar)</option>
+                    {SUPPORTED_CURRENCIES.map(currency => (
+                      <option key={currency} value={currency}>
+                        {currency}
+                      </option>
+                    ))}
                   </select>
                   <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
                     Trip base currency is used for calculations. You can still view your personal amounts in another currency later.

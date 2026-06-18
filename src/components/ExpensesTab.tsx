@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement, ExpenseFeeInput, ExpenseSplitInput } from '../types';
+import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from '../types';
 import {
   calculateConvertedAmount,
   calculateOpenMemberBalances,
@@ -776,10 +776,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       onChange={event => setFormCurrencyWithReason(event.target.value as Currency, 'basic-currency-select')}
                       className="w-full min-h-12 bg-[#1a1d23] border border-slate-800 rounded-2xl px-3 py-3 text-sm font-bold text-slate-100 focus:border-indigo-500 focus:outline-none cursor-pointer"
                     >
-                      <option value="AED">AED</option>
-                      <option value="CNY">CNY</option>
-                      <option value="KZT">KZT</option>
-                      <option value="USD">USD</option>
+                      {SUPPORTED_CURRENCIES.map(currency => (
+                        <option key={currency} value={currency}>
+                          {currency}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
