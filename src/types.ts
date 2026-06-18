@@ -1,4 +1,5 @@
 export type Currency = 'AED' | 'CNY' | 'KZT' | 'USD';
+export const SUPPORTED_CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT', 'USD'];
 export type TripStatus = 'active' | 'closing' | 'closed';
 
 export interface Trip {

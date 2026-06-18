@@ -1,4 +1,4 @@
-import { Currency, ExchangeRate, Member, Trip } from '../types';
+import { Currency, ExchangeRate, Member, SUPPORTED_CURRENCIES, Trip } from '../types';
 
 export interface DisplayMoney {
   primary: string;
@@ -16,8 +16,8 @@ export function normalizeCurrency(value: unknown): string {
 
 export function toCurrency(value: unknown): Currency {
   const normalized = normalizeCurrency(value);
-  if (normalized === 'AED' || normalized === 'CNY' || normalized === 'KZT' || normalized === 'USD') {
-    return normalized;
+  if (SUPPORTED_CURRENCIES.includes(normalized as Currency)) {
+    return normalized as Currency;
   }
   return 'CNY';
 }
