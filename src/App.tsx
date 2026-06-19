@@ -6,6 +6,7 @@ import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
+import { MemberBreakdownSheet } from './components/MemberBreakdownSheet';
 import { LandingPage } from './components/LandingPage';
 import { Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
@@ -90,6 +91,7 @@ export default function App() {
   const [createTripError, setCreateTripError] = useState<string | null>(null);
 
   const [selectedExpenseIdForDetail, setSelectedExpenseIdForDetail] = useState<string | null>(null);
+  const [selectedBreakdownMemberId, setSelectedBreakdownMemberId] = useState<string | null>(null);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [lastRenderedTripId, setLastRenderedTripId] = useState<string | null>(null);
   const [membersInitialCategory, setMembersInitialCategory] = useState<'approved' | 'requests' | 'removed'>('approved');
@@ -120,6 +122,9 @@ export default function App() {
   const tripSplits = workspace?.splits ?? [];
   const tripSettlements = workspace?.settlements ?? [];
   const tripExchangeRates = workspace?.exchangeRates ?? [];
+  const selectedBreakdownMember = selectedBreakdownMemberId
+    ? tripMembers.find(member => member.id === selectedBreakdownMemberId) ?? null
+    : null;
   const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
   const tripStatus = activeTrip?.status ?? 'active';
   const isTripActive = tripStatus === 'active';
@@ -133,6 +138,7 @@ export default function App() {
 
     if (previousTripId !== null && nextTripId !== previousTripId) {
       setSelectedExpenseIdForDetail(null);
+      setSelectedBreakdownMemberId(null);
       setIsAddingExpense(false);
     }
   }, [activeTrip?.id, lastRenderedTripId]);
@@ -1242,6 +1248,20 @@ export default function App() {
                 onActionError={setActionError}
               />
             )}
+            {currentMember?.status === 'approved' && activeTrip && (
+              <MemberBreakdownSheet
+                isOpen={Boolean(selectedBreakdownMember)}
+                onClose={() => setSelectedBreakdownMemberId(null)}
+                member={selectedBreakdownMember}
+                currentMember={currentMember}
+                trip={activeTrip}
+                members={tripMembers}
+                expenses={tripExpenses}
+                splits={tripSplits}
+                settlements={tripSettlements}
+                exchangeRates={tripExchangeRates}
+              />
+            )}
           </>
         )}
 
@@ -1562,6 +1582,7 @@ export default function App() {
                     settlements={tripSettlements}
                     onMarkSettlementPaid={handleMarkSettlementPaid}
                     onVoidSettlement={handleVoidSettlement}
+                    onViewMemberBreakdown={setSelectedBreakdownMemberId}
                   />
                 )}
 
@@ -1576,6 +1597,7 @@ export default function App() {
                     onRemoveMember={handleRemoveMember}
                     onPromoteMember={handlePromoteMember}
                     onDemoteAdmin={handleDemoteAdmin}
+                    onViewMemberSpending={setSelectedBreakdownMemberId}
                   />
                 )}
               </div>
