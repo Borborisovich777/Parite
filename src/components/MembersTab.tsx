@@ -15,6 +15,7 @@ interface MembersTabProps {
   onRemoveMember: (memberId: string) => void | Promise<void>;
   onPromoteMember: (memberId: string) => void | Promise<void>;
   onDemoteAdmin: (memberId: string) => void | Promise<void>;
+  onViewMemberSpending: (memberId: string) => void;
 }
 
 export const MembersTab: React.FC<MembersTabProps> = ({
@@ -27,6 +28,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   onRemoveMember,
   onPromoteMember,
   onDemoteAdmin,
+  onViewMemberSpending,
 }) => {
   const [activeCategory, setActiveCategory] = useState<MemberCategory>(initialCategory);
   const [busyMemberAction, setBusyMemberAction] = useState<{ memberId: string; action: BusyMemberAction } | null>(null);
@@ -137,9 +139,18 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                   </div>
                 </div>
 
-                {isAdmin && isTripActive && !isCurrentUser && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    {member.role === 'admin' ? (
+                <div className="flex items-center justify-end gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    id={`btn-view-spending-${member.id}`}
+                    onClick={() => onViewMemberSpending(member.id)}
+                    className="text-[10px] bg-[#121418] border border-slate-800 text-indigo-300 hover:border-indigo-500/40 rounded-xl px-3 py-2.5 font-bold cursor-pointer"
+                  >
+                    View spending
+                  </button>
+
+                  {isAdmin && isTripActive && !isCurrentUser && (
+                    member.role === 'admin' ? (
                       <button
                         type="button"
                         id={`btn-demote-admin-${member.id}`}
@@ -165,7 +176,10 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                       >
                         {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'promote' ? 'Making admin...' : 'Make admin'}
                       </button>
-                    )}
+                    )
+                  )}
+
+                  {isAdmin && isTripActive && !isCurrentUser && (
                     <button
                       type="button"
                       id={`btn-remove-member-${member.id}`}
@@ -185,8 +199,8 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                         <Trash2 className="w-4 h-4" />
                       )}
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             );
           })}
@@ -218,7 +232,16 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center justify-end gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    id={`btn-view-spending-${request.id}`}
+                    onClick={() => onViewMemberSpending(request.id)}
+                    className="bg-[#121418] border border-slate-800 text-indigo-300 text-[10px] font-bold p-2.5 rounded-xl cursor-pointer"
+                  >
+                    View spending
+                  </button>
+
                   <button
                     type="button"
                     id={`btn-reject-request-${request.id}`}
@@ -267,14 +290,25 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => runMemberAction(member.id, 'approve', () => onApproveMember(member.id))}
-                  disabled={isMemberBusy(member.id) || !isTripActive}
-                  className="text-[10px] bg-[#121418] border border-slate-800 text-slate-200 hover:bg-slate-800 rounded-xl px-3 py-2 font-bold cursor-pointer"
-                >
-                  {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'approve' ? 'Approving...' : 'Approve'}
-                </button>
+                <div className="flex items-center justify-end gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    id={`btn-view-spending-${member.id}`}
+                    onClick={() => onViewMemberSpending(member.id)}
+                    className="text-[10px] bg-[#121418] border border-slate-800 text-indigo-300 hover:border-indigo-500/40 rounded-xl px-3 py-2 font-bold cursor-pointer"
+                  >
+                    View spending
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => runMemberAction(member.id, 'approve', () => onApproveMember(member.id))}
+                    disabled={isMemberBusy(member.id) || !isTripActive}
+                    className="text-[10px] bg-[#121418] border border-slate-800 text-slate-200 hover:bg-slate-800 rounded-xl px-3 py-2 font-bold cursor-pointer"
+                  >
+                    {busyMemberAction?.memberId === member.id && busyMemberAction.action === 'approve' ? 'Approving...' : 'Approve'}
+                  </button>
+                </div>
               </div>
             ))
           )}
