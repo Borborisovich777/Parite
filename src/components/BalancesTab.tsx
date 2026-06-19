@@ -14,6 +14,7 @@ interface BalancesTabProps {
   settlements: Settlement[];
   onMarkSettlementPaid: (fromMemberId: string, toMemberId: string, amount: number) => void | Promise<void>;
   onVoidSettlement: (settlementId: string, reason: string) => void | Promise<void>;
+  onViewMemberBreakdown: (memberId: string) => void;
 }
 
 export const BalancesTab: React.FC<BalancesTabProps> = ({
@@ -26,6 +27,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   settlements,
   onMarkSettlementPaid,
   onVoidSettlement,
+  onViewMemberBreakdown,
 }) => {
   const approvedMembers = members.filter(member => member.status === 'approved');
   const [activeSubTab, setActiveSubTab] = useState<'recommendations' | 'history'>('recommendations');
@@ -72,10 +74,12 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
             );
 
             return (
-              <div
+              <button
+                type="button"
                 key={balance.member_id}
                 id={`balance-row-${balance.member_id}`}
-                className={`rounded-2xl border p-3 flex items-center justify-between gap-3 ${
+                onClick={() => onViewMemberBreakdown(balance.member_id)}
+                className={`rounded-2xl border p-3 flex items-center justify-between gap-3 text-left cursor-pointer hover:border-indigo-500/40 ${
                   isMe ? 'bg-indigo-500/10 border-indigo-500/25' : 'bg-[#121418] border-slate-800'
                 }`}
               >
@@ -86,6 +90,9 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                   <p className="text-[10px] text-slate-500 mt-1 font-mono">
                     Paid {balance.total_paid.toFixed(2)} / share {balance.total_owed.toFixed(2)}
                   </p>
+                  <span className="mt-2 inline-flex rounded-full border border-slate-800 bg-[#121418] px-2 py-1 text-[10px] font-bold text-indigo-300">
+                    View breakdown
+                  </span>
                 </div>
 
                 <div className="text-right shrink-0">
@@ -113,7 +120,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                     </p>
                   )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
