@@ -157,7 +157,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex max-w-md mx-auto">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center md:items-center md:p-6">
       <button
         type="button"
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] cursor-default"
@@ -165,7 +165,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
         onClick={onClose}
       />
 
-      <section className="relative z-10 mt-auto w-full rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up">
+      <section className="relative z-10 w-full max-w-md rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-2xl md:rounded-[28px]">
         <div className="px-4 py-4 border-b border-slate-800 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
