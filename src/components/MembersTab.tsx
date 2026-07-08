@@ -57,7 +57,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   const isMemberBusy = (memberId: string) => busyMemberAction?.memberId === memberId;
 
   return (
-    <div className="flex flex-col gap-4 pb-24 animate-fade-in px-4 pt-4">
+    <div className="flex flex-col gap-4 pb-24 md:pb-6 animate-fade-in px-4 pt-4 md:px-6 lg:px-8">
       <div>
         <h1 className="text-xl font-bold font-display text-white tracking-tight">
           Members
@@ -114,7 +114,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {(!isAdmin || activeCategory === 'approved') && (
-        <section className="flex flex-col gap-2">
+        <section className="grid gap-2 lg:grid-cols-2">
           {approvedMembers.map(member => {
             const isCurrentUser = member.id === currentMember.id;
 
@@ -208,9 +208,9 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {isAdmin && activeCategory === 'requests' && (
-        <section className="flex flex-col gap-2">
+        <section className="grid gap-2 lg:grid-cols-2">
           {pendingRequests.length === 0 ? (
-            <div className="text-center py-12 px-4 bg-[#1a1d23] border border-dashed border-slate-800 rounded-3xl text-slate-400">
+            <div className="text-center py-12 px-4 bg-[#1a1d23] border border-dashed border-slate-800 rounded-3xl text-slate-400 lg:col-span-2">
               <Clock className="w-9 h-9 mx-auto text-slate-700 mb-3" />
               <p className="text-sm font-semibold text-slate-300">No pending requests</p>
               <p className="text-xs text-slate-500 mt-1">New join requests will appear here.</p>
@@ -271,9 +271,9 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {isAdmin && activeCategory === 'removed' && (
-        <section className="flex flex-col gap-2">
+        <section className="grid gap-2 lg:grid-cols-2">
           {otherMembers.length === 0 ? (
-            <div className="text-center py-10 px-4 bg-[#1a1d23] border border-dashed border-slate-800 rounded-3xl">
+            <div className="text-center py-10 px-4 bg-[#1a1d23] border border-dashed border-slate-800 rounded-3xl lg:col-span-2">
               <p className="text-sm text-slate-300 font-semibold">No inactive members</p>
             </div>
           ) : (
