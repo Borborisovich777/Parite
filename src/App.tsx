@@ -1190,8 +1190,8 @@ export default function App() {
   }
 
   return (
-    <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:py-6 items-center select-none font-sans overflow-hidden">
-      <div className="parite-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-full md:max-h-[900px] flex flex-col relative">
+    <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center select-none font-sans overflow-hidden">
+      <div className="parite-shell w-full max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
         {activeTrip && (
           <>
             <AppHeader
@@ -1262,11 +1262,24 @@ export default function App() {
                 exchangeRates={tripExchangeRates}
               />
             )}
+            {currentMember?.status === 'approved' && (
+              <BottomNav
+                variant="desktop"
+                activeTab={activeTab}
+                onChangeTab={(tab) => {
+                  setActiveTab(tab);
+                  setSelectedExpenseIdForDetail(null);
+                  setIsAddingExpense(false);
+                }}
+                pendingRequestsCount={tripMembers.filter(member => member.status === 'pending').length}
+                showAdminBadge={currentMember.role === 'admin'}
+              />
+            )}
           </>
         )}
 
         <div className={`flex-1 min-h-0 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
-            isApprovedWorkspace ? 'mb-[calc(68px+env(safe-area-inset-bottom))]' : ''
+            isApprovedWorkspace ? 'mb-[calc(68px+env(safe-area-inset-bottom))] md:mb-0' : ''
         }`}>
           {!isSupabaseConfigured && renderCenteredMessage(
             'Supabase is not configured',

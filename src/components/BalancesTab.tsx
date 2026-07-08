@@ -42,7 +42,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   const isTripClosed = (trip.status ?? 'active') === 'closed';
 
   return (
-    <div className="flex flex-col gap-4 pb-24 animate-fade-in px-4 pt-4">
+    <div className="flex flex-col gap-4 pb-24 md:pb-6 animate-fade-in px-4 pt-4 md:px-6 lg:px-8">
       <div>
         <h1 className="text-xl font-bold font-display text-white tracking-tight">
           Balances
@@ -52,7 +52,8 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
         </p>
       </div>
 
-      <section className="bg-[#1a1d23] border border-slate-800 rounded-3xl p-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] lg:items-start">
+      <section className="bg-[#1a1d23] border border-slate-800 rounded-3xl p-4 lg:sticky lg:top-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-bold text-slate-100">Member balances</h2>
           <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-2 py-1">
@@ -126,6 +127,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
         </div>
       </section>
 
+      <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-1.5 bg-[#1a1d23] border border-slate-800 p-1 rounded-2xl">
         <button
           type="button"
@@ -357,6 +359,8 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           )}
         </section>
       )}
+      </div>
+      </div>
     </div>
   );
 };

@@ -236,7 +236,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
       : 'border-[var(--color-positive)]/30 bg-[var(--color-positive)]/10 text-[var(--color-positive)]';
 
   return (
-    <div className="fixed inset-0 z-50 flex max-w-md mx-auto">
+    <div className="fixed inset-0 z-50 flex justify-start md:p-6">
       <button
         type="button"
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] cursor-default"
@@ -244,7 +244,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
         onClick={onClose}
       />
 
-      <aside className="relative z-10 h-full w-[84%] max-w-[350px] bg-[#121418] border-r border-slate-800 shadow-2xl flex flex-col animate-slide-up">
+      <aside className="relative z-10 h-full w-[84%] max-w-[350px] bg-[#121418] border-r border-slate-800 shadow-2xl flex flex-col animate-slide-up md:w-[420px] md:max-w-[420px] md:rounded-[28px] md:border">
         <div className="px-4 py-4 border-b border-slate-800/80 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider font-mono text-slate-500">
