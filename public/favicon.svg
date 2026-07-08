@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Parité">
+  <rect width="64" height="64" rx="14" fill="#f4f1de" />
+  <circle cx="32" cy="32" r="24" fill="#81b29a" />
+  <path
+    d="M22 48V16h16c7.7 0 13 5 13 12.1S45.7 40 38 40h-8v8h-8Zm8-16h7.4c3.5 0 5.7-1.4 5.7-3.9s-2.2-3.9-5.7-3.9H30V32Z"
+    fill="#3d405b"
+  />
+  <rect x="35" y="44" width="13" height="4" rx="2" fill="#e07a5f" />
+</svg>

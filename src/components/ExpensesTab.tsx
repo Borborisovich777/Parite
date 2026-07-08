@@ -608,10 +608,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
 
   return (
-    <div className="flex flex-col h-full pb-20 animate-fade-in relative">
+    <div className="flex flex-col h-full pb-20 md:pb-0 animate-fade-in relative">
       {isFormOpen ? (
         <form onSubmit={handleFormSubmit} className="flex min-h-full flex-col bg-[#121418]">
-          <div className="sticky top-0 z-10 bg-[#121418]/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="sticky top-0 z-10 bg-[#121418]/95 backdrop-blur border-b border-slate-800 px-4 py-3 md:px-6 lg:px-8 flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={closeForm}
@@ -631,16 +631,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             <div className="w-10" />
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-5">
+          <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-5 md:px-6 lg:px-8">
             {formError && (
-              <div className="mb-4 bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
+              <div className="mx-auto mb-4 max-w-4xl bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{formError}</span>
               </div>
             )}
 
             {formStep === 'basic' ? (
-              <div className="flex flex-col gap-5">
+              <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-2">
                     {isServiceFeeEnabled ? 'Subtotal before fee' : 'Amount'}
@@ -804,7 +804,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-4">
+              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
                 <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
@@ -1107,7 +1107,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       </button>
                     </div>
 
-                    <div className="flex flex-col gap-2">
+                    <div className="grid gap-2 md:grid-cols-2">
                       {approvedMembers.map(member => {
                         const isChecked = formParticipants.includes(member.id);
                         return (
@@ -1160,7 +1160,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     </div>
 
                     {formSplitMethod === 'equal' ? (
-                      <div className="flex flex-col gap-2">
+                      <div className="grid gap-2 lg:grid-cols-2">
                         {equalPreviewSplits.map(item => {
                           const member = approvedMembers.find(m => m.id === item.member_id);
                           return (
@@ -1233,71 +1233,73 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             <p className="mt-1">{smartCustomSplitResult.error}</p>
                           )}
                         </div>
-                        {formParticipants.map(participantId => {
-                          const member = approvedMembers.find(m => m.id === participantId);
-                          const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
-                          const manualValue = formCustomSplits[participantId] ?? '';
-                          const isManual = manualValue.trim() !== '' && splitRow?.mode === 'manual';
-                          const displaySplit = splitRow?.amount_owed ?? 0;
-                          const displaySubtotalSplit = splitRow?.subtotal_amount_owed ?? displaySplit;
-                          const displayFeeSplit = splitRow?.fee_amount_owed ?? 0;
-                          const displaySplitEquivalent = formatDisplayMoney(
-                            displaySplit,
-                            tripBaseCurrency,
-                            displayCurrency,
-                            safeExchangeRates,
-                            trip.id
-                          );
-                          return (
-                            <label key={participantId} className="flex items-center justify-between gap-3 rounded-2xl bg-[#121418] border border-slate-800 px-3 py-2">
-                              <span className="min-w-0">
-                                <span className="text-sm font-semibold text-slate-200 truncate block">
-                                  {member?.display_name ?? 'Participant'}
+                        <div className="grid gap-2 lg:grid-cols-2">
+                          {formParticipants.map(participantId => {
+                            const member = approvedMembers.find(m => m.id === participantId);
+                            const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
+                            const manualValue = formCustomSplits[participantId] ?? '';
+                            const isManual = manualValue.trim() !== '' && splitRow?.mode === 'manual';
+                            const displaySplit = splitRow?.amount_owed ?? 0;
+                            const displaySubtotalSplit = splitRow?.subtotal_amount_owed ?? displaySplit;
+                            const displayFeeSplit = splitRow?.fee_amount_owed ?? 0;
+                            const displaySplitEquivalent = formatDisplayMoney(
+                              displaySplit,
+                              tripBaseCurrency,
+                              displayCurrency,
+                              safeExchangeRates,
+                              trip.id
+                            );
+                            return (
+                              <label key={participantId} className="flex items-center justify-between gap-3 rounded-2xl bg-[#121418] border border-slate-800 px-3 py-2">
+                                <span className="min-w-0">
+                                  <span className="text-sm font-semibold text-slate-200 truncate block">
+                                    {member?.display_name ?? 'Participant'}
+                                  </span>
+                                  <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
+                                    isManual ? 'text-indigo-300' : 'text-slate-500'
+                                  }`}>
+                                    {isManual ? 'Manual' : 'Auto'}
+                                  </span>
+                                  {!isManual && (
+                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                      Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
+                                    </span>
+                                  )}
+                                  {isServiceFeeEnabled && (
+                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                      +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
+                                    </span>
+                                  )}
+                                  {displaySplitEquivalent.converted && (
+                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                      {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
+                                    </span>
+                                  )}
                                 </span>
-                                <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
-                                  isManual ? 'text-indigo-300' : 'text-slate-500'
-                                }`}>
-                                  {isManual ? 'Manual' : 'Auto'}
+                                <span className="flex items-center gap-2 shrink-0">
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    id={`input-custom-split-${participantId}`}
+                                    value={manualValue}
+                                    onChange={event => {
+                                      const nextValue = event.target.value;
+                                      if (isMoneyInputValue(nextValue)) {
+                                        setFormCustomSplits(prev => ({
+                                          ...prev,
+                                          [participantId]: nextValue,
+                                        }));
+                                      }
+                                    }}
+                                    placeholder={displaySubtotalSplit.toFixed(2)}
+                                    className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
+                                  />
+                                  <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
                                 </span>
-                                {!isManual && (
-                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                    Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
-                                  </span>
-                                )}
-                                {isServiceFeeEnabled && (
-                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                    +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
-                                  </span>
-                                )}
-                                {displaySplitEquivalent.converted && (
-                                  <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                    {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
-                                  </span>
-                                )}
-                              </span>
-                              <span className="flex items-center gap-2 shrink-0">
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  id={`input-custom-split-${participantId}`}
-                                  value={manualValue}
-                                  onChange={event => {
-                                    const nextValue = event.target.value;
-                                    if (isMoneyInputValue(nextValue)) {
-                                      setFormCustomSplits(prev => ({
-                                        ...prev,
-                                        [participantId]: nextValue,
-                                      }));
-                                    }
-                                  }}
-                                  placeholder={displaySubtotalSplit.toFixed(2)}
-                                  className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
-                                />
-                                <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
-                              </span>
-                            </label>
-                          );
-                        })}
+                              </label>
+                            );
+                          })}
+                        </div>
                         <div className="flex justify-between border-t border-slate-800 pt-3 text-xs">
                           <span className="text-slate-500">Calculated total</span>
                           <span className="font-mono text-slate-200 text-right">
@@ -1355,7 +1357,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             )}
           </div>
 
-          <div className="shrink-0 border-t border-slate-800 bg-[#121418] p-4 flex gap-3">
+          <div className="shrink-0 border-t border-slate-800 bg-[#121418] p-4 md:px-6 lg:px-8 flex justify-center gap-3">
             {formStep === 'basic' ? (
               <>
                 <button
@@ -1400,7 +1402,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         </form>
       ) : (
         <>
-          <div className="px-4 pt-4 flex flex-col gap-3 shrink-0">
+          <div className="px-4 pt-4 md:px-6 lg:px-8 flex flex-col gap-3 shrink-0">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h1 className="text-xl font-bold font-display text-white tracking-tight">
@@ -1430,7 +1432,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-2xl bg-[#1a1d23] border border-slate-800/80 p-4">
                 <div className="flex items-center gap-2 text-slate-400 text-xs font-medium mb-3">
                   <span className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center">
@@ -1493,7 +1495,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 mt-3 no-scrollbar">
+          <div className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 mt-3 no-scrollbar">
             {filteredExpenses.length === 0 ? (
               <div className="text-center py-14 px-4 border border-dashed border-slate-800 rounded-3xl bg-[#1a1d23]">
                 <Search className="w-9 h-9 text-slate-700 mx-auto mb-3" />
@@ -1509,7 +1511,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col gap-2 pb-16">
+              <div className="grid gap-2 pb-16 md:grid-cols-2 md:pb-8 xl:grid-cols-3">
                 {filteredExpenses.map(expense => {
                   const paidBy = approvedMembers.find(m => m.id === expense.paid_by_member_id);
                   const displayEquivalent = formatDisplayMoney(
@@ -1567,8 +1569,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       )}
 
       {detailExpense && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center z-50 p-4">
-          <div className="bg-[#121418] w-full max-w-sm rounded-[24px] shadow-2xl overflow-hidden max-h-[85vh] flex flex-col border border-slate-800 animate-slide-up">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center z-50 p-4 md:items-center">
+          <div className="bg-[#121418] w-full max-w-sm md:max-w-xl rounded-[24px] shadow-2xl overflow-hidden max-h-[85vh] flex flex-col border border-slate-800 animate-slide-up">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
               <h3 className="text-sm font-bold text-white font-display">Expense details</h3>
               <button
@@ -1733,7 +1735,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-[#121418] rounded-3xl p-5 shadow-2xl max-w-sm w-full border border-slate-800 flex flex-col gap-4 animate-fade-in">
+          <div className="bg-[#121418] rounded-3xl p-5 shadow-2xl max-w-sm md:max-w-md w-full border border-slate-800 flex flex-col gap-4 animate-fade-in">
             <div className="text-center">
               <div className="w-12 h-12 rounded-full bg-[var(--color-negative)]/15 border border-[var(--color-negative)]/45 text-[var(--color-negative)] flex items-center justify-center mx-auto mb-3">
                 <Trash2 className="w-5 h-5" />

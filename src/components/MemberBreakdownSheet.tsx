@@ -176,7 +176,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex max-w-md mx-auto">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center md:items-center md:p-6">
       <button
         type="button"
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] cursor-default"
@@ -184,7 +184,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
         onClick={onClose}
       />
 
-      <section className="relative z-10 mt-auto flex max-h-[92dvh] w-full flex-col rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up">
+      <section className="relative z-10 flex max-h-[92dvh] w-full max-w-md flex-col rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-4xl md:rounded-[28px]">
         <div className="border-b border-slate-800 px-4 py-4 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-indigo-500/25 bg-indigo-500/15 text-base font-bold uppercase text-indigo-200">
@@ -210,7 +210,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
         </div>
 
         <div className="overflow-y-auto px-4 py-4 flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <MetricCard label="Paid" amount={memberMetrics.totalPaid} icon={<Wallet className="w-4 h-4" />} />
             <MetricCard label="Share" amount={memberMetrics.totalShare} icon={<Scale className="w-4 h-4" />} />
             <MetricCard
