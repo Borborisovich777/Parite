@@ -37,7 +37,7 @@ export function slugifyFilenamePart(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
-  return slug || 'trip';
+  return slug || 'group';
 }
 
 export function downloadCsv(filename: string, csvText: string): void {

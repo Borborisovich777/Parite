@@ -26,8 +26,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
   const isDesktop = variant === 'desktop';
   const containerClassName = isDesktop
-    ? 'hidden md:flex shrink-0 bg-[#121418]/95 backdrop-blur border-b border-slate-800 px-4 py-2 gap-2'
-    : 'bottom-nav-safe fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#121418]/95 backdrop-blur border-t border-slate-800 flex justify-around items-start px-2 z-30 shadow-[0_-8px_28px_rgba(0,0,0,0.12)] shrink-0 md:hidden';
+    ? 'hidden md:flex shrink-0 bg-white/95 backdrop-blur-xl border-b border-[var(--color-border)] px-4 py-2 gap-2'
+    : 'bottom-nav-safe fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/95 backdrop-blur-xl border-t border-[var(--color-border)] flex items-start justify-around px-2 pt-1 z-30 shadow-[0_-10px_30px_rgba(40,73,60,0.09)] shrink-0 md:hidden';
 
   return (
     <div className={containerClassName}>
@@ -37,27 +37,29 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
         return (
           <button
+            type="button"
             key={tab.id}
             id={isDesktop ? `nav-tab-${tab.id}-desktop` : `nav-tab-${tab.id}`}
             onClick={() => onChangeTab(tab.id)}
+            aria-current={isActive ? 'page' : undefined}
             className={`relative flex items-center justify-center text-center transition-all cursor-pointer ${
               isActive
-                ? 'text-indigo-400'
-                : 'text-slate-500 hover:text-slate-300'
-            } ${isDesktop ? 'min-h-11 flex-1 rounded-2xl border border-transparent px-4 py-2 gap-2 text-sm font-bold hover:border-slate-800' : 'flex-col flex-1 h-[68px] py-1'}`}
+                ? 'text-[var(--color-positive)]'
+                : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+            } ${isDesktop ? 'min-h-11 flex-1 rounded-2xl border border-transparent px-4 py-2 gap-2 text-sm font-bold hover:border-[var(--color-border)] hover:bg-[var(--color-surface-soft)]' : 'flex-col flex-1 h-[61px] min-w-[44px] py-0.5'}`}
           >
-            <div className={`relative p-1.5 rounded-2xl transition-transform duration-150 active:scale-95 ${
-              isActive ? 'bg-indigo-500/10' : ''
+            <div className={`relative flex h-8 min-w-10 items-center justify-center rounded-xl px-2 transition-all duration-150 active:scale-95 ${
+              isActive ? 'bg-[var(--color-positive-soft)] shadow-[inset_0_0_0_1px_rgba(47,125,102,0.08)]' : ''
             }`}>
               <IconComponent className={`w-5.5 h-5.5 transition-colors ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
               
               {'badge' in tab && tab.badge > 0 ? (
-                <span className="absolute -top-0.5 -right-0.5 bg-rose-500 text-slate-950 font-mono font-bold text-[9px] w-4.5 h-4.5 rounded-full flex items-center justify-center border border-[#1a1d23] animate-pulse">
+                <span className="absolute -top-1 -right-1 bg-[var(--color-negative)] text-white font-mono font-bold text-[9px] min-w-4.5 h-4.5 px-1 rounded-full flex items-center justify-center border-2 border-white tabular-nums">
                   {tab.badge}
                 </span>
               ) : null}
             </div>
-            <span className={`${isDesktop ? 'text-sm' : 'text-[11px] mt-0.5'} tracking-tight font-medium ${isActive ? 'font-bold text-indigo-300' : 'text-slate-500'}`}>
+            <span className={`${isDesktop ? 'text-sm' : 'text-[11px] mt-0.5'} tracking-tight ${isActive ? 'font-bold text-[var(--color-positive)]' : 'font-medium text-[var(--color-muted)]'}`}>
               {tab.label}
             </span>
           </button>
