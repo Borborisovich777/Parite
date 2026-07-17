@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import type { AccountAccess } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -54,6 +55,41 @@ export async function signInWithEmail(email: string, password: string): Promise<
 export async function signOut(): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.auth.signOut();
+  if (error) throwAuthError(error);
+}
+
+function parseAccountAccess(value: unknown, operation: string): AccountAccess {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${operation} returned an invalid account record.`);
+  }
+
+  return value as AccountAccess;
+}
+
+export async function getMyAccountAccess(): Promise<AccountAccess> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('get_my_account_access');
+  if (error) throwAuthError(error);
+  return parseAccountAccess(data, 'get_my_account_access');
+}
+
+export async function listPendingAccountAccess(): Promise<AccountAccess[]> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc('list_pending_account_access');
+  if (error) throwAuthError(error);
+  if (!Array.isArray(data)) throw new Error('Could not read account approval requests.');
+  return data.map(value => parseAccountAccess(value, 'list_pending_account_access'));
+}
+
+export async function approveAccount(userId: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client.rpc('approve_account', { user_id_input: userId });
+  if (error) throwAuthError(error);
+}
+
+export async function rejectAccount(userId: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client.rpc('reject_account', { user_id_input: userId });
   if (error) throwAuthError(error);
 }
 

@@ -352,6 +352,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const detailDisplayAmount = detailExpense
     ? formatDisplayMoney(detailExpense.converted_amount, tripBaseCurrency, displayCurrency, safeExchangeRates, trip.id)
     : null;
+  const detailBlockingSettlements = detailExpense
+    ? settlements
+      .filter(settlement => {
+        if (settlement.status !== 'paid' || settlement.voided_at) return false;
+
+        const settlementTime = Date.parse(settlement.paid_at ?? settlement.created_at);
+        const expenseTime = Date.parse(detailExpense.created_at);
+        return Number.isFinite(settlementTime)
+          && Number.isFinite(expenseTime)
+          && settlementTime >= expenseTime;
+      })
+      .sort((left, right) => Date.parse(right.paid_at ?? right.created_at) - Date.parse(left.paid_at ?? left.created_at))
+    : [];
   const formVisual = resolveExpenseVisual(formTitle, formVisualId);
   const formVisualCategory = getExpenseVisualCategory(formVisual.categoryId);
 
@@ -650,6 +663,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const handleDelete = async () => {
     if (!selectedExpenseIdForDetail) return;
+    if (detailBlockingSettlements.length > 0) {
+      setBlockingError(
+        `Void ${detailBlockingSettlements.length} remaining paid settlement${detailBlockingSettlements.length === 1 ? '' : 's'} in Balances before deleting this expense.`
+      );
+      return;
+    }
     setIsSaving(true);
     try {
       await onDeleteExpense(selectedExpenseIdForDetail);
@@ -1972,9 +1991,41 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </div>
               <h4 className="text-sm font-bold text-white font-display">Delete expense?</h4>
               <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                This will remove the expense from normal lists and recalculate balances. If this expense was already part of a paid settlement, void that settlement first.
+                This will remove the expense from normal lists and recalculate balances.
               </p>
             </div>
+
+            {detailBlockingSettlements.length > 0 && (
+              <div className="rounded-2xl border border-amber-400/35 bg-amber-400/10 p-3 text-left">
+                <div className="flex gap-2 text-amber-200">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold">
+                      {detailBlockingSettlements.length} paid settlement{detailBlockingSettlements.length === 1 ? '' : 's'} must be voided first
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-amber-100/75">
+                      Open Balances → Settlement history and void every blocking paid settlement. The expense will then be deletable immediately.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {detailBlockingSettlements.slice(0, 3).map(settlement => {
+                    const fromMember = members.find(member => member.id === settlement.from_member_id);
+                    const toMember = members.find(member => member.id === settlement.to_member_id);
+                    return (
+                      <p key={settlement.id} className="rounded-xl bg-slate-950/35 px-2.5 py-2 text-[11px] text-slate-300">
+                        {fromMember?.display_name ?? 'Member'} → {toMember?.display_name ?? 'Member'} · {settlement.amount.toFixed(2)} {settlement.currency}
+                      </p>
+                    );
+                  })}
+                  {detailBlockingSettlements.length > 3 && (
+                    <p className="px-2.5 text-[11px] text-amber-100/70">
+                      +{detailBlockingSettlements.length - 3} more paid settlements
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {formError && (
               <div className="bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
@@ -1995,10 +2046,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 type="button"
                 id="btn-delete-expense-submit"
                 onClick={handleDelete}
-                disabled={isSaving}
+                disabled={isSaving || detailBlockingSettlements.length > 0}
                 className="bg-[var(--color-negative)] disabled:opacity-60 text-slate-950 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
               >
-                {isSaving ? 'Deleting...' : 'Delete'}
+                {isSaving
+                  ? 'Deleting...'
+                  : detailBlockingSettlements.length > 0
+                    ? 'Void first'
+                    : 'Delete'}
               </button>
             </div>
           </div>
