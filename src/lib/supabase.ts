@@ -66,11 +66,59 @@ function parseAccountAccess(value: unknown, operation: string): AccountAccess {
   return value as AccountAccess;
 }
 
-export async function getMyAccountAccess(): Promise<AccountAccess> {
+export type AccountAccessLookup =
+  | { mode: 'enforced'; access: AccountAccess }
+  | { mode: 'legacy'; access: null };
+
+const isMissingAccountAccessRpc = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
+  const context = [candidate.message, candidate.details, candidate.hint]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  return candidate.code === 'PGRST202' && context.includes('get_my_account_access');
+};
+
+const accountApprovalIsRequired = String(import.meta.env.VITE_ACCOUNT_APPROVAL_MODE ?? '')
+  .trim()
+  .toLowerCase() === 'required';
+
+const accountAccessUnavailableError = () => {
+  const error = new Error(
+    'Account verification is temporarily unavailable. Ask an administrator to finish the account-access setup, then try again.'
+  ) as Error & { code?: string };
+  error.code = 'ACCOUNT_ACCESS_UNAVAILABLE';
+  return error;
+};
+
+export async function getMyAccountAccess(): Promise<AccountAccessLookup> {
   const client = requireSupabase();
-  const { data, error } = await client.rpc('get_my_account_access');
+  let { data, error } = await client.rpc('get_my_account_access');
+
+  // A schema-cache refresh can briefly make a newly deployed RPC invisible.
+  // Retry once before treating the project as a pre-account-approval schema.
+  if (isMissingAccountAccessRpc(error)) {
+    await new Promise(resolve => window.setTimeout(resolve, 300));
+    ({ data, error } = await client.rpc('get_my_account_access'));
+  }
+
+  if (isMissingAccountAccessRpc(error)) {
+    if (accountApprovalIsRequired) throw accountAccessUnavailableError();
+
+    // Backward compatibility for projects that have not installed the account
+    // approval migration yet. Never use this path for permission, network, data,
+    // or real pending/rejected-account errors.
+    return { mode: 'legacy', access: null };
+  }
+
   if (error) throwAuthError(error);
-  return parseAccountAccess(data, 'get_my_account_access');
+  return {
+    mode: 'enforced',
+    access: parseAccountAccess(data, 'get_my_account_access'),
+  };
 }
 
 export async function listPendingAccountAccess(): Promise<AccountAccess[]> {

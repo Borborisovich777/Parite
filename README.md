@@ -168,6 +168,7 @@ For local testing, disabling email confirmations can make sign-up faster. For pr
 2. Add environment variables:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_ACCOUNT_APPROVAL_MODE=required` after migrations `202607170001` and `202607170002` are applied and verified
 3. Use build command:
 
 ```bash
@@ -307,6 +308,15 @@ notify pgrst, 'reload schema';
 ```
 
 Wait a few seconds, refresh the app, and retry the action.
+
+Account approval temporarily defaults to compatibility mode when the exact
+`get_my_account_access` RPC is absent, so deploying the frontend before migration
+`202607170001_account_approval.sql` does not lock out signed-in users. While the
+migration is absent, every authenticated account follows the legacy access model;
+the account-approval queue and platform-admin actions remain unavailable.
+After that migration is installed and verified, set
+`VITE_ACCOUNT_APPROVAL_MODE=required` in production and redeploy to fail closed if
+the account-access RPC ever becomes unavailable.
 
 If create/join/load fails after deployment, check:
 
