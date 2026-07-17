@@ -18,8 +18,8 @@ interface LandingPageProps {
 
 const features = [
   {
-    title: 'Private trip groups',
-    body: 'Create invite-code trips, review member requests, and keep shared expenses scoped to your group.',
+    title: 'Private expense groups',
+    body: 'Create invite-code groups, review member requests, and keep shared expenses scoped to your group.',
     icon: Users,
   },
   {
@@ -29,15 +29,15 @@ const features = [
   },
   {
     title: 'Manual currency control',
-    body: 'Use manual exchange rates and display currency settings while trip accounting stays consistent.',
+    body: 'Use manual exchange rates and display currency settings while group accounting stays consistent.',
     icon: Receipt,
   },
 ] as const;
 
 const steps = [
   {
-    title: 'Create or join a trip',
-    body: 'Start a private trip space or enter an invite code and wait for admin approval.',
+    title: 'Create or join a group',
+    body: 'Start a private group space or enter an invite code and wait for admin approval.',
     icon: UserPlus,
   },
   {
@@ -59,11 +59,11 @@ const faqs = [
   },
   {
     question: 'How are currencies handled?',
-    answer: 'Trips use a base currency, admins can set manual exchange rates, and members can choose a display currency.',
+    answer: 'Groups use a base currency, admins can set manual exchange rates, and members can choose a display currency.',
   },
   {
-    question: 'Can a trip stay private?',
-    answer: 'Yes. Trips use invite codes, and admins approve member access before people join the group.',
+    question: 'Can a group stay private?',
+    answer: 'Yes. Groups use invite codes, and admins approve member access before people join.',
   },
   {
     question: 'Can we export the final records?',
@@ -79,7 +79,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     <header className="sticky top-0 z-30 border-b border-[var(--color-border)] bg-[var(--color-app-background)]/95 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3 sm:px-6 lg:px-8">
         <a href="#top" className="flex items-center gap-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40">
-          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-indigo-600 text-white accent-glow">
+          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-indigo-600 text-slate-950 accent-glow">
             <Compass className="h-5 w-5 stroke-[2.5]" aria-hidden="true" />
           </span>
           <span className="font-display text-lg font-extrabold tracking-tight text-[var(--color-text)]">
@@ -121,7 +121,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             Split expenses fairly. Understand balances instantly.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-[var(--color-muted)] sm:text-lg">
-            Parité helps private groups track shared trip expenses, service fees, settlements, and balances across multiple currencies — without spreadsheets or payment integrations.
+            Parité helps private groups track shared expenses, service fees, settlements, and balances across multiple currencies — without spreadsheets or payment integrations.
           </p>
           <p className="mt-4 flex max-w-2xl items-start gap-2 text-sm font-semibold leading-6 text-[var(--color-text)]">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#4f7f68]" aria-hidden="true" />
@@ -145,7 +145,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </a>
           </div>
           <p className="mt-6 max-w-2xl text-xs font-semibold leading-6 text-[var(--color-muted)]">
-            Supports invite-code trips, admin approval, manual exchange rates, display currency, service fees, smart splits, settlements, and CSV export.
+            Supports invite-code groups, admin approval, manual exchange rates, display currency, service fees, smart splits, settlements, and CSV export.
           </p>
         </div>
 
@@ -237,7 +237,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     <footer className="border-t border-[var(--color-border)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-6 text-xs text-[var(--color-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
         <span className="font-bold text-[var(--color-text)]">Parité</span>
-        <span>Private trip expenses, balances, settlements, and exports.</span>
+        <span>Private group expenses, balances, settlements, and exports.</span>
       </div>
     </footer>
   </div>

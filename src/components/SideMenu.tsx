@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Currency, Member, SUPPORTED_CURRENCIES, Trip } from '../types';
 import { WorkspaceSummary } from '../lib/tripRepository';
+import { MemberAvatar } from './MemberAvatar';
 
 type ExportType = 'expenses' | 'balances' | 'settlements';
 type LifecycleAction = 'leave' | 'start-close' | 'approve-close' | 'cancel-close';
@@ -169,7 +170,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
     const nextName = tripNameInput.trim();
 
     if (!nextName) {
-      reportSettingsError('Trip name is required.');
+      reportSettingsError('Group name is required.');
       return;
     }
 
@@ -179,7 +180,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
       await onUpdateTripName(nextName);
     } catch (error) {
       console.error(error);
-      reportSettingsError(getSafeMessage(error, 'Could not rename trip.'));
+      reportSettingsError(getSafeMessage(error, 'Could not rename group.'));
     } finally {
       setIsSavingTripName(false);
     }
@@ -230,68 +231,66 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   };
 
   const statusStyles = isTripClosed
-    ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+    ? 'border-[var(--color-negative)]/20 bg-[var(--color-negative-soft)] text-[var(--color-negative)]'
     : isTripClosing
-      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-      : 'border-[var(--color-positive)]/30 bg-[var(--color-positive)]/10 text-[var(--color-positive)]';
+      ? 'border-amber-500/20 bg-amber-50 text-amber-700'
+      : 'border-[var(--color-positive)]/20 bg-[var(--color-positive-soft)] text-[var(--color-positive)]';
 
   return (
     <div className="fixed inset-0 z-50 flex justify-start md:p-6">
       <button
         type="button"
-        className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] cursor-default"
+        className="absolute inset-0 bg-[#17211d]/45 backdrop-blur-[2px] cursor-default"
         aria-label="Close menu"
         onClick={onClose}
       />
 
-      <aside className="relative z-10 h-full w-[84%] max-w-[350px] bg-[#121418] border-r border-slate-800 shadow-2xl flex flex-col animate-slide-up md:w-[420px] md:max-w-[420px] md:rounded-[28px] md:border">
-        <div className="px-4 py-4 border-b border-slate-800/80 flex items-start justify-between gap-3">
+      <aside className="relative z-10 flex h-full w-[90%] max-w-[380px] flex-col overflow-hidden rounded-r-[28px] border-r border-[var(--color-border)] bg-[var(--color-app-background)] shadow-[var(--shadow-sheet)] animate-slide-up md:w-[420px] md:max-w-[420px] md:rounded-[28px] md:border">
+        <div className="app-header-safe header-wash flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-4 pb-4">
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-wider font-mono text-slate-500">
-              Current trip
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-positive)]">
+              Current group
             </p>
-            <h2 className="text-lg font-bold text-white font-display truncate mt-1">
+            <h2 className="mt-1 truncate text-xl font-bold font-display text-[var(--color-text)]">
               {trip.name}
             </h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Base currency: <span className="font-mono text-indigo-300">{trip.base_currency}</span>
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              Base currency <span className="font-mono font-bold text-[var(--color-positive)]">{trip.base_currency}</span>
             </p>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-xl bg-[#1a1d23] border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-[var(--color-text)] shadow-sm cursor-pointer"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-4 flex flex-col gap-5">
-          <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
-            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-3">
+        <div className="no-scrollbar flex flex-1 flex-col gap-3 overflow-y-auto px-3.5 py-4">
+          <section className="parite-card p-4">
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
               Signed in as
             </p>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-500/15 border border-indigo-500/25 text-indigo-200 flex items-center justify-center font-bold uppercase">
-                {currentMember ? currentMember.display_name.charAt(0) : '?'}
-              </div>
+              <MemberAvatar member={currentMember} size="md" />
               <div className="min-w-0">
-                <p className="text-sm font-bold text-slate-100 truncate">
-                  {currentMember?.display_name ?? 'No trip member'}
+                <p className="truncate text-sm font-bold text-[var(--color-text)]">
+                  {currentMember?.display_name ?? 'No group member'}
                 </p>
-                <div className="flex items-center gap-2 mt-1 text-[10px] uppercase font-mono text-slate-500">
+                <div className="mt-1 flex items-center gap-2 text-[10px] font-mono uppercase text-[var(--color-muted)]">
                   <span>{currentMember?.status ?? 'not joined'}</span>
                   {isAdmin && (
-                    <span className="inline-flex items-center gap-1 text-emerald-400">
+                    <span className="inline-flex items-center gap-1 text-[var(--color-positive)]">
                       <ShieldCheck className="w-3 h-3" />
                       Admin
                     </span>
                   )}
                 </div>
                 {accountEmail && (
-                  <p className="text-[10px] text-slate-500 mt-1 truncate">
+                  <p className="mt-1 truncate text-[10px] text-[var(--color-muted)]">
                     {accountEmail}
                   </p>
                 )}
@@ -300,10 +299,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
           </section>
 
           {isApprovedMember && (
-            <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4 flex flex-col gap-3">
+            <section className="parite-card flex flex-col gap-3 p-4">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
-                  Trip status
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
+                  Group status
                 </p>
                 <span className={`text-[10px] font-mono uppercase inline-flex rounded-full border px-2 py-1 ${statusStyles}`}>
                   {tripStatus}
@@ -316,9 +315,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   id="btn-approve-trip-closure"
                   onClick={() => runLifecycleAction('approve-close', onApproveTripClosure)}
                   disabled={lifecycleBusyAction !== null}
-                  className="w-full min-h-11 rounded-2xl bg-[var(--color-positive)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
+                  className="w-full min-h-11 rounded-2xl bg-[var(--color-positive)] text-[#fff] px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                 >
-                  {lifecycleBusyAction === 'approve-close' ? 'Approving close request...' : 'Approve close trip'}
+                  {lifecycleBusyAction === 'approve-close' ? 'Approving close request...' : 'Approve group closure'}
                 </button>
               )}
 
@@ -327,42 +326,42 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   type="button"
                   id="btn-leave-trip"
                   onClick={() => {
-                    if (confirm('Leave this trip? Your historical expenses will stay visible.')) {
+                    if (confirm('Leave this group? Your historical expenses will stay visible.')) {
                       runLifecycleAction('leave', onLeaveTrip);
                     }
                   }}
                   disabled={lifecycleBusyAction !== null}
-                  className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
+                  className="w-full min-h-11 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-[var(--color-negative)] px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                 >
-                  {lifecycleBusyAction === 'leave' ? 'Leaving trip...' : 'Leave trip'}
+                  {lifecycleBusyAction === 'leave' ? 'Leaving group...' : 'Leave group'}
                 </button>
               )}
 
               {isTripClosed && (
-                <p className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-semibold text-[#3d405b] leading-relaxed">
-                  This trip is closed and read-only.
+                <p className="rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 py-2 text-xs font-semibold text-[var(--color-negative)] leading-relaxed">
+                  This group is closed and read-only.
                 </p>
               )}
             </section>
           )}
 
           {isAdmin && isApprovedMember && (
-            <details className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4" open>
+            <details className="parite-card p-4" open>
               <summary className="cursor-pointer list-none flex items-center justify-between gap-3">
                 <span>
-                  <span className="block text-[10px] uppercase tracking-wider font-bold text-slate-500">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
                     Admin settings
                   </span>
-                  <span className="block text-xs text-slate-400 mt-1">
+                  <span className="mt-1 block text-xs text-[var(--color-muted)]">
                     Invite, members, and lifecycle
                   </span>
                 </span>
-                <ShieldCheck className="w-4 h-4 text-indigo-300" />
+                <ShieldCheck className="h-4 w-4 text-[var(--color-positive)]" />
               </summary>
 
               <div className="mt-4 flex flex-col gap-4">
                 {settingsError && (
-                  <div className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-bold text-[#3d405b]">
+                  <div className="rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 py-2 text-xs font-bold text-[var(--color-negative)]">
                     {settingsError}
                   </div>
                 )}
@@ -370,23 +369,23 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 {isTripActive ? (
                   <>
                     <div>
-                      <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">
-                        Trip name
+                      <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
+                        Group name
                       </label>
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
                           value={tripNameInput}
                           onChange={event => setTripNameInput(event.target.value)}
-                          className="min-w-0 flex-1 min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-100 px-3 py-2 text-sm font-semibold focus:border-[var(--color-positive)] focus:outline-none"
-                          placeholder="Trip name"
+                          className="min-w-0 flex-1 min-h-11 rounded-2xl border border-[var(--color-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--color-text)] focus:border-[var(--color-positive)] focus:outline-none"
+                          placeholder="Group name"
                         />
                         <button
                           type="button"
                           onClick={handleSaveTripName}
                           disabled={isSavingTripName || tripNameInput.trim() === trip.name}
-                          className="w-11 h-11 rounded-2xl bg-[var(--color-positive)] text-slate-950 flex items-center justify-center cursor-pointer disabled:opacity-60"
-                          aria-label="Save trip name"
+                          className="w-11 h-11 rounded-2xl bg-[var(--color-positive)] text-[#fff] flex items-center justify-center cursor-pointer disabled:opacity-60"
+                          aria-label="Save group name"
                         >
                           {isSavingTripName ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />}
                         </button>
@@ -395,24 +394,24 @@ export const SideMenu: React.FC<SideMenuProps> = ({
 
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
                           Invite code
                         </p>
                         {copiedInvite && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[var(--color-positive)]">
                             <Check className="w-3.5 h-3.5" />
                             Copied
                           </span>
                         )}
                       </div>
-                      <div className="rounded-2xl border border-slate-800 bg-[#121418] px-4 py-3 font-mono text-lg font-bold tracking-widest text-white">
+                      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-4 py-3 font-mono text-lg font-bold tracking-widest text-[var(--color-text)]">
                         {trip.invite_code}
                       </div>
                       <div className="grid grid-cols-2 gap-2 mt-2">
                         <button
                           type="button"
                           onClick={handleCopyInvite}
-                          className="min-h-10 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-2 flex items-center justify-center gap-2 font-bold text-xs cursor-pointer"
+                          className="min-h-10 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-positive)] px-3 py-2 flex items-center justify-center gap-2 font-bold text-xs cursor-pointer"
                         >
                           <Copy className="w-4 h-4" />
                           Copy
@@ -421,7 +420,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                           type="button"
                           onClick={handleRegenerateInvite}
                           disabled={isRegeneratingInvite}
-                          className="min-h-10 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-2 flex items-center justify-center gap-2 font-bold text-xs cursor-pointer disabled:opacity-60"
+                          className="min-h-10 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-[var(--color-negative)] px-3 py-2 flex items-center justify-center gap-2 font-bold text-xs cursor-pointer disabled:opacity-60"
                         >
                           <RefreshCw className={`w-4 h-4 ${isRegeneratingInvite ? 'animate-spin' : ''}`} />
                           Regenerate
@@ -430,8 +429,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     </div>
                   </>
                 ) : (
-                  <p className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-semibold text-[#3d405b] leading-relaxed">
-                    Admin settings are read-only while this trip is {tripStatus}.
+                  <p className="rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 py-2 text-xs font-semibold text-[var(--color-negative)] leading-relaxed">
+                    Admin settings are read-only while this group is {tripStatus}.
                   </p>
                 )}
 
@@ -445,13 +444,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                           onPendingRequests();
                           onClose();
                         }}
-                        className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center justify-between gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+                        className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center justify-between gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30"
                       >
                         <span className="inline-flex items-center gap-2">
-                          <UserPlus className="w-4 h-4 text-indigo-300" />
+                          <UserPlus className="h-4 w-4 text-[var(--color-positive)]" />
                           Pending requests
                         </span>
-                        <span className="text-[10px] font-mono text-slate-500">
+                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-mono text-[var(--color-muted)]">
                           {pendingRequestsCount}
                         </span>
                       </button>
@@ -463,9 +462,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                           onAdminTools();
                           onClose();
                         }}
-                        className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+                        className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30"
                       >
-                        <Users className="w-4 h-4 text-indigo-300" />
+                        <Users className="h-4 w-4 text-[var(--color-positive)]" />
                         Member management
                       </button>
 
@@ -473,12 +472,12 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                         type="button"
                         id="btn-start-trip-closure"
                         onClick={() => {
-                          if (confirm('Start closing this trip? Everyone must approve before it becomes read-only.')) {
+                          if (confirm('Start closing this group? Everyone must approve before it becomes read-only.')) {
                             runLifecycleAction('start-close', onStartTripClosure);
                           }
                         }}
                         disabled={lifecycleBusyAction !== null}
-                        className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
+                        className="w-full min-h-11 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-[var(--color-negative)] px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                       >
                         {lifecycleBusyAction === 'start-close' ? 'Starting close request...' : 'Start close request'}
                       </button>
@@ -491,7 +490,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                       id="btn-cancel-trip-closure"
                       onClick={() => runLifecycleAction('cancel-close', onCancelTripClosure)}
                       disabled={lifecycleBusyAction !== null}
-                      className="w-full min-h-11 rounded-2xl bg-[var(--color-negative)] text-slate-950 px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
+                      className="w-full min-h-11 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-[var(--color-negative)] px-3 py-3 font-bold text-sm cursor-pointer disabled:opacity-60"
                     >
                       {lifecycleBusyAction === 'cancel-close' ? 'Cancelling close request...' : 'Cancel close request'}
                     </button>
@@ -501,8 +500,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
             </details>
           )}
 
-          <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
-            <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-3">
+          <section className="parite-card p-4">
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
               General
             </p>
             {isApprovedMember && (
@@ -513,32 +512,32 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   onExchangeRates();
                   onClose();
                 }}
-                className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+                className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30"
               >
-                <Settings className="w-4 h-4 text-indigo-300" />
+                <Settings className="h-4 w-4 text-[var(--color-positive)]" />
                 Exchange rates
               </button>
             )}
 
-            <div className={isApprovedMember ? 'mt-4 pt-4 border-t border-slate-800' : ''}>
-              <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">
+            <div className={isApprovedMember ? 'mt-4 border-t border-[var(--color-border)] pt-4' : ''}>
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
                 Display currency
               </label>
               <select
                 value={displayCurrencyInput}
                 onChange={event => setDisplayCurrencyInput(event.target.value as Currency | '')}
                 disabled={!currentMember || isSavingDisplayCurrency}
-                className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-100 px-3 py-2 text-sm font-semibold focus:border-[var(--color-positive)] focus:outline-none disabled:opacity-60"
+                className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--color-text)] focus:border-[var(--color-positive)] focus:outline-none disabled:opacity-60"
               >
-                <option value="">Same as trip base currency</option>
+                <option value="">Same as group base currency</option>
                 {SUPPORTED_CURRENCIES.map(currency => (
                   <option key={currency} value={currency}>
                     {currency}
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                Only changes how amounts are shown to you. Trip accounting stays in {trip.base_currency}.
+              <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-muted)]">
+                Only changes how amounts are shown to you. Group accounting stays in {trip.base_currency}.
               </p>
               {displayCurrencyError && (
                 <p className="text-[11px] text-[var(--color-negative)] mt-2 leading-relaxed">
@@ -549,7 +548,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 type="button"
                 onClick={handleSaveDisplayCurrency}
                 disabled={!currentMember || isSavingDisplayCurrency || displayCurrencyInput === (currentMember?.display_currency ?? '')}
-                className="mt-3 w-full min-h-10 rounded-2xl bg-[var(--color-positive)] text-slate-950 px-3 py-2 font-bold text-xs cursor-pointer disabled:opacity-60"
+                className="mt-3 w-full min-h-10 rounded-2xl bg-[var(--color-positive)] text-[#fff] px-3 py-2 font-bold text-xs cursor-pointer disabled:opacity-60"
               >
                 {isSavingDisplayCurrency ? 'Saving...' : 'Save display currency'}
               </button>
@@ -557,8 +556,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
           </section>
 
           {isApprovedMember && (
-            <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-3">
+            <section className="parite-card p-4">
+              <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
                 Export
               </p>
               <div className="flex flex-col gap-2">
@@ -567,9 +566,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   id="btn-export-expenses-csv"
                   onClick={onExportExpensesCsv}
                   disabled={exportBusy !== null}
-                  className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40 disabled:opacity-60"
+                  className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
                 >
-                  <Download className="w-4 h-4 text-indigo-300" />
+                  <Download className="h-4 w-4 text-[var(--color-positive)]" />
                   {exportBusy === 'expenses' ? 'Exporting expenses...' : 'Export expenses CSV'}
                 </button>
                 <button
@@ -577,9 +576,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   id="btn-export-balances-csv"
                   onClick={onExportBalancesCsv}
                   disabled={exportBusy !== null}
-                  className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40 disabled:opacity-60"
+                  className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
                 >
-                  <Download className="w-4 h-4 text-indigo-300" />
+                  <Download className="h-4 w-4 text-[var(--color-positive)]" />
                   {exportBusy === 'balances' ? 'Exporting balances...' : 'Export balances CSV'}
                 </button>
                 <button
@@ -587,19 +586,19 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   id="btn-export-settlements-csv"
                   onClick={onExportSettlementsCsv}
                   disabled={exportBusy !== null}
-                  className="w-full min-h-11 rounded-2xl bg-[#121418] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40 disabled:opacity-60"
+                  className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
                 >
-                  <Download className="w-4 h-4 text-indigo-300" />
+                  <Download className="h-4 w-4 text-[var(--color-positive)]" />
                   {exportBusy === 'settlements' ? 'Exporting settlements...' : 'Export settlements CSV'}
                 </button>
               </div>
             </section>
           )}
 
-          <section className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-4">
+          <section className="parite-card p-4">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
-                Trips
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
+                Groups
               </p>
               <button
                 type="button"
@@ -607,9 +606,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   onShowTripSelection();
                   onClose();
                 }}
-                className="text-[10px] font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer"
+                className="text-[10px] font-bold text-[var(--color-positive)] cursor-pointer"
               >
-                Switch trip
+                Switch group
               </button>
             </div>
 
@@ -628,24 +627,24 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     }}
                     className={`w-full rounded-2xl border px-3 py-3 text-left cursor-pointer ${
                       isActive
-                        ? 'bg-indigo-500/10 border-indigo-500/35'
-                        : 'bg-[#121418] border-slate-800 hover:border-slate-700'
+                        ? 'border-[var(--color-positive)]/25 bg-[var(--color-positive-soft)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-surface-soft)] hover:border-[var(--color-positive)]/25'
                     }`}
                   >
                     <span className="flex items-center justify-between gap-3">
                       <span className="min-w-0">
-                        <span className="text-sm font-bold text-slate-100 truncate block">
+                        <span className="block truncate text-sm font-bold text-[var(--color-text)]">
                           {workspace.trip_name}
                         </span>
-                        <span className="text-[10px] text-slate-500 mt-1 block truncate">
+                        <span className="mt-1 block truncate text-[10px] text-[var(--color-muted)]">
                           {workspace.display_name} - {workspace.role}
                         </span>
                       </span>
                       <span className="text-right shrink-0">
-                        <span className="text-[10px] font-mono font-bold text-indigo-300 block">
+                        <span className="block text-[10px] font-mono font-bold text-[var(--color-positive)]">
                           {workspace.base_currency}
                         </span>
-                        <span className="text-[9px] uppercase text-slate-500 block mt-1">
+                        <span className="mt-1 block text-[9px] uppercase text-[var(--color-muted)]">
                           {workspace.trip_status && workspace.trip_status !== 'active'
                             ? workspace.trip_status
                             : workspace.status}
@@ -666,10 +665,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 onCreateTrip();
                 onClose();
               }}
-              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+              className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm shadow-[var(--shadow-card)] cursor-pointer hover:border-[var(--color-positive)]/30"
             >
-              <Plus className="w-4 h-4 text-indigo-300" />
-              Create trip
+              <Plus className="h-4 w-4 text-[var(--color-positive)]" />
+              Create group
             </button>
 
             <button
@@ -679,10 +678,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 onJoinTrip();
                 onClose();
               }}
-              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+              className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm shadow-[var(--shadow-card)] cursor-pointer hover:border-[var(--color-positive)]/30"
             >
-              <UserPlus className="w-4 h-4 text-indigo-300" />
-              Join trip
+              <UserPlus className="h-4 w-4 text-[var(--color-positive)]" />
+              Join group
             </button>
 
             <button
@@ -692,10 +691,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 onShowTripSelection();
                 onClose();
               }}
-              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+              className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm shadow-[var(--shadow-card)] cursor-pointer hover:border-[var(--color-positive)]/30"
             >
-              <ArrowLeft className="w-4 h-4 text-indigo-300" />
-              Switch trip
+              <ArrowLeft className="h-4 w-4 text-[var(--color-positive)]" />
+              Switch group
             </button>
 
             <button
@@ -705,9 +704,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 onLogout();
                 onClose();
               }}
-              className="w-full min-h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-indigo-500/40"
+              className="w-full min-h-11 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-[var(--color-negative)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer"
             >
-              <LogOut className="w-4 h-4 text-indigo-300" />
+              <LogOut className="h-4 w-4" />
               Log out
             </button>
           </section>

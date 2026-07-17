@@ -73,10 +73,10 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   const isAdmin = currentMember.role === 'admin' && currentMember.status === 'approved';
   const canEditRates = canEdit && isAdmin && !isTripReadOnly;
   const helperText = isTripReadOnly
-    ? 'This trip is read-only. Exchange rates can still be viewed.'
+    ? 'This group is read-only. Exchange rates can still be viewed.'
     : canEditRates
       ? null
-      : 'Exchange rates are managed by trip admins.';
+      : 'Exchange rates are managed by group admins.';
   const getSafeMessage = (error: unknown, fallback: string) => {
     if (!(error instanceof Error) || !error.message.trim()) return fallback;
 
@@ -89,8 +89,8 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   const handleSave = async (fromCurrency: Currency) => {
     if (!canEditRates) {
       const message = isTripReadOnly
-        ? 'This trip is read-only. Exchange rates can still be viewed.'
-        : 'Only trip admins can update exchange rates.';
+        ? 'This group is read-only. Exchange rates can still be viewed.'
+        : 'Only group admins can update exchange rates.';
       setError(message);
       onActionError?.(message);
       return;
@@ -113,9 +113,9 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
     } catch (saveError) {
       console.error(saveError);
       const fallback = isTripReadOnly
-        ? 'This trip is read-only. Exchange rates can still be viewed.'
+        ? 'This group is read-only. Exchange rates can still be viewed.'
         : !isAdmin
-          ? 'Only trip admins can update exchange rates.'
+          ? 'Only group admins can update exchange rates.'
           : 'Could not save exchange rate.';
       const message = getSafeMessage(saveError, fallback);
       setError(message);
@@ -202,7 +202,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
             <>
               {currentTripRates.length === 0 && (
                 <p className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-3 text-xs text-slate-400 leading-relaxed">
-                  No exchange rates set yet. Add rates for currencies used in this trip.
+                  No exchange rates set yet. Add rates for currencies used in this group.
                 </p>
               )}
               {pairs.map(fromCurrency => {
@@ -259,8 +259,8 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
           ) : (
             <p className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-3 text-xs text-slate-400 leading-relaxed">
               {isAdmin
-                ? 'No exchange rates set yet. Add rates for currencies used in this trip.'
-                : 'No exchange rates have been set yet. Ask a trip admin to add them.'}
+                ? 'No exchange rates set yet. Add rates for currencies used in this group.'
+                : 'No exchange rates have been set yet. Ask a group admin to add them.'}
             </p>
           )}
         </div>

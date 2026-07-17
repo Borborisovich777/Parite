@@ -1,7 +1,7 @@
 {
   "name": "Parité",
   "short_name": "Parité",
-  "description": "A mobile-first trip expense splitting app with multi-currency support.",
+  "description": "A mobile-first group expense splitting app with multi-currency support.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
