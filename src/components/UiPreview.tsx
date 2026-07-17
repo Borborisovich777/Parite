@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AppHeader } from './AppHeader';
+import { AccountSecuritySheet } from './AccountSecuritySheet';
 import { BalancesTab } from './BalancesTab';
 import { BottomNav, TabType } from './BottomNav';
 import { ExpensesTab } from './ExpensesTab';
@@ -21,6 +22,9 @@ export const UiPreview: React.FC = () => {
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
+  const [isAccountSecurityOpen, setIsAccountSecurityOpen] = useState(false);
+  const [previewEmail] = useState('mira@example.com');
+  const [previewPendingEmail, setPreviewPendingEmail] = useState<string | null>(null);
   const [selectedBreakdownMemberId, setSelectedBreakdownMemberId] = useState<string | null>(null);
 
   const trip = workspace.trip!;
@@ -203,6 +207,17 @@ export const UiPreview: React.FC = () => {
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center font-sans overflow-hidden">
       <div className="mobile-prototype parite-shell w-full max-w-md md:max-w-3xl lg:max-w-5xl bg-[var(--color-app-background)] border border-[var(--color-border)] md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
+        <AccountSecuritySheet
+          isOpen={isAccountSecurityOpen}
+          currentEmail={previewEmail}
+          pendingEmail={previewPendingEmail}
+          onClose={() => setIsAccountSecurityOpen(false)}
+          onChangeEmail={async (_currentPassword, nextEmail) => {
+            setPreviewPendingEmail(nextEmail);
+            return { currentEmail: previewEmail, pendingEmail: nextEmail };
+          }}
+          onChangePassword={async () => undefined}
+        />
         <AppHeader
           trip={trip}
           currentMember={currentMember}
@@ -213,7 +228,8 @@ export const UiPreview: React.FC = () => {
           isOpen={isSideMenuOpen}
           trip={trip}
           currentMember={currentMember}
-          accountEmail="mira@example.com"
+          accountEmail={previewEmail}
+          onAccountSettings={() => setIsAccountSecurityOpen(true)}
           workspaces={[{
             member_id: currentMember.id,
             trip_id: trip.id,

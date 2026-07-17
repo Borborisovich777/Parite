@@ -345,7 +345,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
             )}
           </section>
 
-          <section className="flex flex-col gap-3">
+          <section className="flex min-w-0 flex-col gap-3">
             <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-slate-800 bg-[#1a1d23] p-1">
               <button
                 type="button"

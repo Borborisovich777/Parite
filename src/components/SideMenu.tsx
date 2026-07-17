@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   Edit2,
+  KeyRound,
   LogOut,
   Plus,
   RefreshCw,
@@ -30,6 +31,7 @@ interface SideMenuProps {
   currentMemberId: string | null;
   pendingRequestsCount: number;
   onClose: () => void;
+  onAccountSettings: () => void;
   onSwitchWorkspace: (memberId: string) => void | Promise<void>;
   onShowTripSelection: () => void;
   onCreateTrip: () => void;
@@ -61,6 +63,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   currentMemberId,
   pendingRequestsCount,
   onClose,
+  onAccountSettings,
   onSwitchWorkspace,
   onShowTripSelection,
   onCreateTrip,
@@ -296,6 +299,18 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 )}
               </div>
             </div>
+            <button
+              type="button"
+              id="btn-menu-account-security"
+              onClick={onAccountSettings}
+              className="mt-4 flex min-h-11 w-full cursor-pointer items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-2.5 text-left text-sm font-semibold text-[var(--color-text)] hover:border-[var(--color-positive)]/30"
+            >
+              <span className="inline-flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-[var(--color-positive)]" />
+                Account & security
+              </span>
+              <span className="text-[10px] font-bold text-[var(--color-positive)]">Manage</span>
+            </button>
           </section>
 
           {isApprovedMember && (
