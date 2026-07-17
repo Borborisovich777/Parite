@@ -23,6 +23,7 @@ interface SpendingDonutChartProps {
 
 const DONUT_RADIUS = 44;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
+const DONUT_SEGMENT_GAP = 2.4;
 
 export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
   slices,
@@ -58,11 +59,17 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
   const segments = chartSlices.map(slice => {
     const percent = slice.amount / total * 100;
     const segmentLength = slice.amount / total * DONUT_CIRCUMFERENCE;
+    const gapLength = chartSlices.length > 1
+      ? Math.min(DONUT_SEGMENT_GAP, segmentLength * 0.22)
+      : 0;
     const segment = {
       ...slice,
       percent,
-      dashLength: Math.max(segmentLength - 1.5, 0.8),
-      dashOffset: -runningOffset,
+      // Keep every dash inside its own angular allocation. A fixed minimum dash
+      // can grow a tiny category into the next slice, while round line caps can
+      // visually add almost a full stroke width across a narrow gap.
+      dashLength: segmentLength - gapLength,
+      dashOffset: -(runningOffset + gapLength / 2),
     };
     runningOffset += segmentLength;
     return segment;
@@ -77,19 +84,10 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
     onSelectSlice?.(selectedSliceId === sliceId ? null : sliceId);
   };
 
-  const handleLegendKeyDown = (
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    sliceId: string,
-  ) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    toggleSlice(sliceId);
-  };
-
   return (
-    <div className="rounded-3xl border border-[var(--color-border)] bg-white p-4">
-      <div className="flex flex-col gap-4 sm:grid sm:grid-cols-[176px_1fr] sm:items-center">
-        <div className="relative mx-auto h-44 w-44 shrink-0">
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-[var(--color-border)] bg-white p-4">
+      <div className="flex min-w-0 flex-col gap-4 sm:grid sm:grid-cols-[minmax(9rem,11rem)_minmax(0,1fr)] sm:items-center">
+        <div className="relative mx-auto aspect-square w-full max-w-44 shrink-0">
           <svg
             viewBox="0 0 120 120"
             className="h-full w-full overflow-visible"
@@ -109,7 +107,7 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
               const isHovered = hoveredSliceId === slice.id;
               const hasActiveSlice = Boolean(selectedSliceId || hoveredSliceId);
 
-              const dashArray = `${slice.dashLength} ${DONUT_CIRCUMFERENCE - slice.dashLength}`;
+              const dashArray = `${slice.dashLength} ${Math.max(DONUT_CIRCUMFERENCE - slice.dashLength, 0.001)}`;
 
               return (
                 <g key={slice.id}>
@@ -119,10 +117,10 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
                     r={DONUT_RADIUS}
                     fill="none"
                     stroke={slice.color}
-                    strokeWidth={isSelected || isHovered ? 22 : 18}
+                    strokeWidth={isSelected || isHovered ? 20 : 18}
                     strokeDasharray={dashArray}
                     strokeDashoffset={slice.dashOffset}
-                    strokeLinecap="round"
+                    strokeLinecap="butt"
                     transform="rotate(-90 60 60)"
                     opacity={hasActiveSlice && !isSelected && !isHovered ? 0.34 : 1}
                     className="transition-[opacity,stroke-width,filter] duration-150"
@@ -137,10 +135,10 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
                     r={DONUT_RADIUS}
                     fill="none"
                     stroke="transparent"
-                    strokeWidth="34"
+                    strokeWidth="32"
                     strokeDasharray={dashArray}
                     strokeDashoffset={slice.dashOffset}
-                    strokeLinecap="round"
+                    strokeLinecap="butt"
                     transform="rotate(-90 60 60)"
                     className="cursor-pointer"
                     style={{ pointerEvents: 'stroke' }}
@@ -153,14 +151,14 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
             })}
           </svg>
 
-          <div className="pointer-events-none absolute inset-[34px] flex flex-col items-center justify-center rounded-full border border-[var(--color-border)] bg-white px-2 text-center shadow-sm">
-            <span className="max-w-full truncate text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+          <div className="pointer-events-none absolute inset-[24%] flex min-h-0 min-w-0 flex-col items-center justify-center overflow-hidden rounded-full border border-[var(--color-border)] bg-white px-1.5 text-center shadow-sm">
+            <span className="block w-[92%] break-words text-[clamp(7px,2.1vw,9px)] font-bold uppercase leading-[1.05] tracking-[0.06em] text-[var(--color-muted)]">
               {activeSlice?.label ?? 'All categories'}
             </span>
-            <span className="mt-1 max-w-full truncate font-mono text-[11px] font-bold text-[var(--color-text)]">
+            <span className="mt-1 block w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[clamp(9px,2.7vw,11px)] font-bold leading-tight text-[var(--color-text)]">
               {formatMoney(activeAmount, currency)}
             </span>
-            <span className="mt-0.5 text-[9px] font-bold text-[var(--color-muted)]">
+            <span className="mt-0.5 block w-full overflow-hidden text-ellipsis whitespace-nowrap text-[clamp(8px,2.3vw,9px)] font-bold leading-tight text-[var(--color-muted)]">
               {activePercent.toFixed(0)}%
             </span>
           </div>
@@ -176,7 +174,6 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
                 key={slice.id}
                 type="button"
                 onClick={() => toggleSlice(slice.id)}
-                onKeyDown={event => handleLegendKeyDown(event, slice.id)}
                 onMouseEnter={() => setHoveredSliceId(slice.id)}
                 onMouseLeave={() => setHoveredSliceId(null)}
                 onFocus={() => setHoveredSliceId(slice.id)}
