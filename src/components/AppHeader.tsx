@@ -26,10 +26,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         type="button"
         id="btn-open-side-menu"
         onClick={onMenuOpen}
-        className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-2xl bg-white/45 text-[var(--color-text)] transition-all hover:bg-white/70 active:scale-95"
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-white/45 text-[var(--color-text)] transition-all hover:bg-white/70 active:scale-95 md:w-auto md:px-2.5 md:pr-3.5"
         aria-label={currentMember ? `Open menu for ${currentMember.display_name}` : 'Open menu'}
       >
         <MemberAvatar member={currentMember} size="md" />
+        <span className="hidden text-xs font-bold md:inline">Menu</span>
       </button>
 
       <div className="min-w-0 flex-1">

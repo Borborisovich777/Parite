@@ -7,11 +7,17 @@ import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
 import { MemberBreakdownSheet } from './components/MemberBreakdownSheet';
+import {
+  AccountSecuritySheet,
+  type AccountEmailChangeResult,
+} from './components/AccountSecuritySheet';
 import { LandingPage } from './components/LandingPage';
 import { UiPreview } from './components/UiPreview';
 import { Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
 import {
+  changeAccountEmail,
+  changeAccountPassword,
   isSupabaseConfigured,
   signInWithEmail,
   signOut,
@@ -50,6 +56,7 @@ import {
   ArrowLeft,
   Clock,
   Compass,
+  KeyRound,
   Plus,
   UserPlus,
   X,
@@ -70,6 +77,7 @@ function PariteApp() {
   const [activeTab, setActiveTab] = useState<TabType>('expenses');
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isExchangeRatesOpen, setIsExchangeRatesOpen] = useState(false);
+  const [isAccountSecurityOpen, setIsAccountSecurityOpen] = useState(false);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authEmail, setAuthEmail] = useState('');
@@ -117,6 +125,7 @@ function PariteApp() {
   };
 
   const activeTrip = workspace?.trip ?? null;
+  const authUserId = authUser?.id ?? null;
   const currentMember = workspace?.currentMember ?? null;
   const tripMembers = workspace?.members ?? [];
   const tripExpenses = workspace?.expenses ?? [];
@@ -129,6 +138,10 @@ function PariteApp() {
   const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
   const tripStatus = activeTrip?.status ?? 'active';
   const isTripActive = tripStatus === 'active';
+
+  useEffect(() => {
+    setIsAccountSecurityOpen(false);
+  }, [authUserId]);
 
   useEffect(() => {
     const nextTripId = activeTrip?.id ?? null;
@@ -303,7 +316,7 @@ function PariteApp() {
   useEffect(() => {
     if (isBootstrapping) return;
 
-    if (!authUser) {
+    if (!authUserId) {
       setWorkspace(null);
       setWorkspaces([]);
       clearActiveMemberId();
@@ -333,7 +346,7 @@ function PariteApp() {
     return () => {
       cancelled = true;
     };
-  }, [authUser, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace, refreshWorkspaces]);
+  }, [authUserId, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace, refreshWorkspaces]);
 
   const handleAuthSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -379,12 +392,39 @@ function PariteApp() {
       setWorkspace(null);
       setWorkspaces([]);
       setIsSideMenuOpen(false);
+      setIsAccountSecurityOpen(false);
       clearActiveMemberId();
       setActiveTab('expenses');
     } catch (error) {
       console.error(error);
       setActionErrorFromUnknown(error, 'Could not log out.');
     }
+  };
+
+  const handleChangeAccountEmail = async (
+    currentPassword: string,
+    nextEmail: string,
+  ): Promise<AccountEmailChangeResult> => {
+    const currentEmail = authUser?.email;
+    if (!currentEmail) throw new Error('This account does not have an email address to update.');
+
+    const updatedUser = await changeAccountEmail(currentEmail, currentPassword, nextEmail);
+    setAuthUser(updatedUser);
+    return {
+      currentEmail: updatedUser.email ?? currentEmail,
+      pendingEmail: updatedUser.new_email ?? null,
+    };
+  };
+
+  const handleChangeAccountPassword = async (
+    currentPassword: string,
+    nextPassword: string,
+  ): Promise<void> => {
+    const currentEmail = authUser?.email;
+    if (!currentEmail) throw new Error('This account does not have an email address for verification.');
+
+    const updatedUser = await changeAccountPassword(currentEmail, currentPassword, nextPassword);
+    setAuthUser(updatedUser);
   };
 
   const handleCreateTripSubmit = async (event: React.FormEvent) => {
@@ -1056,17 +1096,27 @@ function PariteApp() {
   };
 
   const renderAccountStrip = () => authUser ? (
-    <div className="w-full max-w-xs mx-auto rounded-2xl bg-[#1a1d23] border border-slate-800 px-3 py-2 flex items-center justify-between gap-3">
+    <div className="w-full max-w-sm mx-auto rounded-2xl bg-[#1a1d23] border border-slate-800 px-3 py-2 flex items-center justify-between gap-3">
       <span className="text-[10px] text-slate-500 truncate">
         {authUser.email}
       </span>
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="text-[10px] font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer shrink-0"
-      >
-        Log out
-      </button>
+      <span className="flex shrink-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setIsAccountSecurityOpen(true)}
+          className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 text-[10px] font-bold text-indigo-300 hover:text-indigo-200"
+        >
+          <KeyRound className="h-3.5 w-3.5" />
+          Account
+        </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="min-h-9 text-[10px] font-bold text-slate-400 hover:text-slate-200 cursor-pointer"
+        >
+          Log out
+        </button>
+      </span>
     </div>
   ) : null;
 
@@ -1193,6 +1243,16 @@ function PariteApp() {
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center select-none font-sans overflow-hidden">
       <div className="parite-shell w-full max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
+        {authUser?.email && (
+          <AccountSecuritySheet
+            isOpen={isAccountSecurityOpen}
+            currentEmail={authUser.email}
+            pendingEmail={authUser.new_email ?? null}
+            onClose={() => setIsAccountSecurityOpen(false)}
+            onChangeEmail={handleChangeAccountEmail}
+            onChangePassword={handleChangeAccountPassword}
+          />
+        )}
         {activeTrip && (
           <>
             <AppHeader
@@ -1205,6 +1265,7 @@ function PariteApp() {
               trip={activeTrip}
               currentMember={currentMember}
               accountEmail={authUser?.email ?? null}
+              onAccountSettings={() => setIsAccountSecurityOpen(true)}
               workspaces={workspaces}
               currentMemberId={currentMember?.id ?? null}
               onClose={() => setIsSideMenuOpen(false)}
@@ -1279,8 +1340,10 @@ function PariteApp() {
           </>
         )}
 
-        <div className={`flex-1 min-h-0 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
-            isApprovedWorkspace ? 'mb-[calc(68px+env(safe-area-inset-bottom))] md:mb-0' : ''
+        <div className={`no-scrollbar flex min-h-0 flex-1 flex-col select-text bg-[#121418] ${
+            isApprovedWorkspace
+              ? 'mb-[calc(68px+env(safe-area-inset-bottom))] overflow-hidden md:mb-0'
+              : 'overflow-y-auto'
         }`}>
           {!isSupabaseConfigured && renderCenteredMessage(
             'Supabase is not configured',
@@ -1554,7 +1617,7 @@ function PariteApp() {
           )}
 
           {activeTrip && currentMember && currentMember.status === 'approved' && (
-            <div className="flex-1 flex flex-col bg-[#121418]">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#121418]">
               {renderActionErrorBanner()}
 
               {!actionError && isWorkspaceLoading && (
@@ -1563,7 +1626,7 @@ function PariteApp() {
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto">
+              <div className={`min-h-0 flex-1 ${activeTab === 'expenses' ? 'overflow-hidden' : 'no-scrollbar overflow-y-auto'}`}>
                 {activeTab === 'expenses' && (
                   <ExpensesTab
                     trip={activeTrip}
