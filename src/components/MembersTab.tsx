@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Trip, Member } from '../types';
-import { Clock, Pencil, Shield, Trash2, UserCheck, UserX } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AccountAccess, Trip, Member } from '../types';
+import { Check, Clock, Copy, Pencil, RefreshCw, Shield, ShieldCheck, Trash2, UserCheck, UserPlus, UserX } from 'lucide-react';
 import { MemberAvatar } from './MemberAvatar';
 import { MemberAvatarPicker } from './MemberAvatarPicker';
 
@@ -11,6 +11,11 @@ interface MembersTabProps {
   trip: Trip;
   currentMember: Member;
   members: Member[];
+  accountRequests?: AccountAccess[];
+  isPlatformAdmin?: boolean;
+  busyAccountUserId?: string | null;
+  busyAccountDecision?: 'approve' | 'reject' | null;
+  isRefreshing?: boolean;
   initialCategory?: MemberCategory;
   onApproveMember: (memberId: string) => void | Promise<void>;
   onRejectMember: (memberId: string) => void | Promise<void>;
@@ -18,12 +23,21 @@ interface MembersTabProps {
   onPromoteMember: (memberId: string) => void | Promise<void>;
   onDemoteAdmin: (memberId: string) => void | Promise<void>;
   onViewMemberSpending: (memberId: string) => void;
+  onApproveAccount?: (userId: string) => void | Promise<void>;
+  onRejectAccount?: (userId: string) => void | Promise<void>;
+  onRegenerateInviteCode?: () => Promise<void>;
+  onRefresh?: () => void | Promise<void>;
 }
 
 export const MembersTab: React.FC<MembersTabProps> = ({
   trip,
   currentMember,
   members,
+  accountRequests = [],
+  isPlatformAdmin = false,
+  busyAccountUserId = null,
+  busyAccountDecision = null,
+  isRefreshing = false,
   initialCategory = 'approved',
   onApproveMember,
   onRejectMember,
@@ -31,20 +45,37 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   onPromoteMember,
   onDemoteAdmin,
   onViewMemberSpending,
+  onApproveAccount,
+  onRejectAccount,
+  onRegenerateInviteCode,
+  onRefresh,
 }) => {
   const [activeCategory, setActiveCategory] = useState<MemberCategory>(initialCategory);
   const [busyMemberAction, setBusyMemberAction] = useState<{ memberId: string; action: BusyMemberAction } | null>(null);
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
+  const [isRegeneratingInvite, setIsRegeneratingInvite] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [memberManagementError, setMemberManagementError] = useState<string | null>(null);
+  const copiedInviteTimeoutRef = useRef<number | null>(null);
 
   const isAdmin = currentMember.role === 'admin';
+  const canManageRequests = isAdmin || isPlatformAdmin;
   const isTripActive = (trip.status ?? 'active') === 'active';
   const approvedMembers = members.filter(member => member.status === 'approved');
   const pendingRequests = members.filter(member => member.status === 'pending');
   const otherMembers = members.filter(member => member.status === 'removed' || member.status === 'rejected');
+  const pendingRequestCount = (isAdmin ? pendingRequests.length : 0)
+    + (isPlatformAdmin ? accountRequests.length : 0);
 
   useEffect(() => {
     setActiveCategory(initialCategory);
   }, [initialCategory]);
+
+  useEffect(() => () => {
+    if (copiedInviteTimeoutRef.current !== null) {
+      window.clearTimeout(copiedInviteTimeoutRef.current);
+    }
+  }, []);
 
   const runMemberAction = async (memberId: string, actionType: BusyMemberAction, action: () => void | Promise<void>) => {
     setBusyMemberAction({ memberId, action: actionType });
@@ -59,6 +90,59 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 
   const isMemberBusy = (memberId: string) => busyMemberAction?.memberId === memberId;
 
+  const copyInviteCode = async () => {
+    setMemberManagementError(null);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trip.invite_code);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = trip.invite_code;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+          document.execCommand('copy');
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+      setCopiedInvite(true);
+      if (copiedInviteTimeoutRef.current !== null) {
+        window.clearTimeout(copiedInviteTimeoutRef.current);
+      }
+      copiedInviteTimeoutRef.current = window.setTimeout(() => {
+        setCopiedInvite(false);
+        copiedInviteTimeoutRef.current = null;
+      }, 1800);
+    } catch (error) {
+      console.error(error);
+      setMemberManagementError('Could not copy the invite code.');
+    }
+  };
+
+  const regenerateInviteCode = async () => {
+    if (!onRegenerateInviteCode || !confirm('Create a new invite code? The current code will stop working.')) return;
+
+    setIsRegeneratingInvite(true);
+    setMemberManagementError(null);
+    try {
+      await onRegenerateInviteCode();
+      setCopiedInvite(false);
+      if (copiedInviteTimeoutRef.current !== null) {
+        window.clearTimeout(copiedInviteTimeoutRef.current);
+        copiedInviteTimeoutRef.current = null;
+      }
+    } catch (error) {
+      console.error(error);
+      setMemberManagementError(error instanceof Error ? error.message : 'Could not create a new invite code.');
+    } finally {
+      setIsRegeneratingInvite(false);
+    }
+  };
+
   return (
     <div className={`flex flex-col gap-5 px-4 pb-24 pt-5 md:px-6 md:pb-6 lg:px-8 ${isAvatarPickerOpen ? '' : 'animate-fade-in'}`}>
       <div className="flex items-end justify-between gap-4">
@@ -71,18 +155,82 @@ export const MembersTab: React.FC<MembersTabProps> = ({
           </h1>
           <p className="mt-1 text-xs leading-relaxed text-[var(--color-muted)]">
             {approvedMembers.length} {approvedMembers.length === 1 ? 'person is' : 'people are'} sharing this group
-            {isAdmin && pendingRequests.length > 0
-              ? ` · ${pendingRequests.length} waiting for approval`
+            {canManageRequests && pendingRequestCount > 0
+              ? ` · ${pendingRequestCount} waiting for approval`
               : '.'}
           </p>
         </div>
-        <span className="shrink-0 rounded-full border border-[var(--color-border)] bg-white px-3 py-1.5 text-[10px] font-bold text-[var(--color-positive)] shadow-sm">
-          {approvedMembers.length} active
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          {onRefresh && (
+            <button
+              type="button"
+              id="btn-refresh-members"
+              onClick={() => onRefresh()}
+              disabled={isRefreshing}
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-positive)] shadow-sm disabled:opacity-60"
+              aria-label={isRefreshing ? 'Refreshing members' : 'Refresh members'}
+              title={isRefreshing ? 'Refreshing members' : 'Refresh members'}
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+          <span className="rounded-full border border-[var(--color-border)] bg-white px-3 py-1.5 text-[10px] font-bold text-[var(--color-positive)] shadow-sm">
+            {approvedMembers.length} active
+          </span>
+        </div>
       </div>
 
-      {isAdmin && (
-        <div className="grid shrink-0 grid-cols-3 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1">
+      {isAdmin && isTripActive && (
+        <section className="header-wash rounded-3xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-card)]">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-[var(--color-positive)] shadow-sm">
+              <UserPlus className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-bold text-[var(--color-text)]">Add a member</h2>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--color-muted)]">
+                Share this code. New join requests will appear in the Requests folder automatically.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1 rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 font-mono text-lg font-bold tracking-[0.18em] text-[var(--color-text)]">
+              {trip.invite_code}
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+              <button
+                type="button"
+                id="btn-copy-member-invite"
+                onClick={copyInviteCode}
+                className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-white px-4 text-xs font-bold text-[var(--color-positive)]"
+              >
+                {copiedInvite ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {copiedInvite ? 'Copied' : 'Copy code'}
+              </button>
+              <button
+                type="button"
+                id="btn-regenerate-member-invite"
+                onClick={regenerateInviteCode}
+                disabled={isRegeneratingInvite || !onRegenerateInviteCode}
+                className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-4 text-xs font-bold text-[var(--color-negative)] disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRegeneratingInvite ? 'animate-spin' : ''}`} />
+                New code
+              </button>
+            </div>
+          </div>
+
+          {memberManagementError && (
+            <p className="mt-3 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 py-2 text-xs font-bold text-[var(--color-negative)]">
+              {memberManagementError}
+            </p>
+          )}
+        </section>
+      )}
+
+      {canManageRequests && (
+        <div className={`grid shrink-0 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <button
             type="button"
             onClick={() => setActiveCategory('approved')}
@@ -106,28 +254,30 @@ export const MembersTab: React.FC<MembersTabProps> = ({
             }`}
           >
             Requests
-            {pendingRequests.length > 0 && (
+            {pendingRequestCount > 0 && (
               <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-negative)] px-1 text-[8px] font-bold text-[#fff]">
-                {pendingRequests.length}
+                {pendingRequestCount}
               </span>
             )}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveCategory('removed')}
-            className={`min-h-10 rounded-xl px-1 text-[10px] font-bold transition-all cursor-pointer ${
-              activeCategory === 'removed'
-                ? 'bg-white text-[var(--color-positive)] shadow-sm'
-                : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
-            }`}
-          >
-            Inactive ({otherMembers.length})
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveCategory('removed')}
+              className={`min-h-10 rounded-xl px-1 text-[10px] font-bold transition-all cursor-pointer ${
+                activeCategory === 'removed'
+                  ? 'bg-white text-[var(--color-positive)] shadow-sm'
+                  : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              Inactive ({otherMembers.length})
+            </button>
+          )}
         </div>
       )}
 
-      {(!isAdmin || activeCategory === 'approved') && (
+      {(!canManageRequests || activeCategory === 'approved') && (
         <section className="grid gap-3 lg:grid-cols-2">
           {approvedMembers.map(member => {
             const isCurrentUser = member.id === currentMember.id;
@@ -234,70 +384,141 @@ export const MembersTab: React.FC<MembersTabProps> = ({
         </section>
       )}
 
-      {isAdmin && activeCategory === 'requests' && (
-        <section className="grid gap-3 lg:grid-cols-2">
-          {pendingRequests.length === 0 ? (
+      {canManageRequests && activeCategory === 'requests' && (
+        <section className="flex flex-col gap-4">
+          {pendingRequestCount === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--color-border)] bg-white px-4 py-12 text-center text-[var(--color-muted)] lg:col-span-2">
               <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-positive-soft)] text-[var(--color-positive)]">
                 <Clock className="h-5 w-5" />
               </span>
               <p className="text-sm font-semibold text-[var(--color-text)]">No pending requests</p>
-              <p className="mt-1 text-xs text-[var(--color-muted)]">New join requests will appear here.</p>
+              <p className="mt-1 text-xs text-[var(--color-muted)]">New accounts and group join requests will appear here automatically.</p>
             </div>
-          ) : (
-            pendingRequests.map(request => (
-              <div
-                key={request.id}
-                id={`pending-member-card-${request.id}`}
-                className="parite-card flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <MemberAvatar member={request} size="md" />
-                  <div className="min-w-0">
-                    <span className="block truncate text-sm font-bold text-[var(--color-text)]">
-                      {request.display_name}
-                    </span>
-                    <span className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[var(--color-muted)]">
-                      <Clock className="w-3 h-3" />
-                      {new Date(request.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
+          ) : null}
+
+          {isPlatformAdmin && accountRequests.length > 0 && (
+            <section aria-labelledby="account-request-heading">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <h2 id="account-request-heading" className="flex items-center gap-2 text-sm font-bold text-[var(--color-text)]">
+                    <ShieldCheck className="h-4 w-4 text-[var(--color-positive)]" />
+                    New account requests
+                  </h2>
+                  <p className="mt-1 text-[10px] text-[var(--color-muted)]">Approve an account before it can join any group.</p>
                 </div>
-
-                <div className="grid w-full shrink-0 grid-cols-3 gap-2 sm:flex sm:w-auto sm:justify-end">
-                  <button
-                    type="button"
-                    id={`btn-view-spending-${request.id}`}
-                    onClick={() => onViewMemberSpending(request.id)}
-                    className="min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-2.5 text-[10px] font-bold text-[var(--color-positive)] cursor-pointer"
-                  >
-                    View spending
-                  </button>
-
-                  <button
-                    type="button"
-                    id={`btn-reject-request-${request.id}`}
-                    onClick={() => runMemberAction(request.id, 'reject', () => onRejectMember(request.id))}
-                    disabled={isMemberBusy(request.id) || !isTripActive}
-                    className="min-w-0 rounded-xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] p-2.5 text-[10px] font-bold text-[var(--color-negative)] cursor-pointer flex items-center justify-center gap-1"
-                  >
-                    <UserX className="w-3.5 h-3.5" />
-                    <span>{busyMemberAction?.memberId === request.id && busyMemberAction.action === 'reject' ? 'Rejecting...' : 'Reject'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    id={`btn-approve-request-${request.id}`}
-                    onClick={() => runMemberAction(request.id, 'approve', () => onApproveMember(request.id))}
-                    disabled={isMemberBusy(request.id) || !isTripActive}
-                    className="min-w-0 rounded-xl bg-[var(--color-positive)] p-2.5 text-[10px] font-bold text-[#fff] cursor-pointer flex items-center justify-center gap-1"
-                  >
-                    <UserCheck className="w-3.5 h-3.5" />
-                    <span>{busyMemberAction?.memberId === request.id && busyMemberAction.action === 'approve' ? 'Approving...' : 'Approve'}</span>
-                  </button>
-                </div>
+                <span className="rounded-full bg-[var(--color-positive-soft)] px-2.5 py-1 text-[10px] font-bold text-[var(--color-positive)]">
+                  {accountRequests.length}
+                </span>
               </div>
-            ))
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                {accountRequests.map(request => {
+                  const isBusy = busyAccountUserId === request.user_id;
+                  return (
+                    <div key={request.user_id} id={`account-request-${request.user_id}`} className="parite-card flex flex-col gap-3 p-3.5">
+                      <div className="min-w-0">
+                        <p className="break-all text-sm font-bold text-[var(--color-text)]">{request.email}</p>
+                        <p className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[var(--color-muted)]">
+                          <Clock className="h-3 w-3" />
+                          Requested {new Date(request.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          id={`btn-reject-account-${request.user_id}`}
+                          onClick={() => onRejectAccount?.(request.user_id)}
+                          disabled={Boolean(busyAccountUserId) || !onRejectAccount}
+                          className="flex min-h-10 cursor-pointer items-center justify-center gap-1 rounded-xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 text-xs font-bold text-[var(--color-negative)] disabled:opacity-60"
+                        >
+                          <UserX className="h-4 w-4" />
+                          {isBusy && busyAccountDecision === 'reject' ? 'Working...' : 'Reject'}
+                        </button>
+                        <button
+                          type="button"
+                          id={`btn-approve-account-${request.user_id}`}
+                          onClick={() => onApproveAccount?.(request.user_id)}
+                          disabled={Boolean(busyAccountUserId) || !onApproveAccount}
+                          className="flex min-h-10 cursor-pointer items-center justify-center gap-1 rounded-xl bg-[var(--color-positive)] px-3 text-xs font-bold text-white disabled:opacity-60"
+                        >
+                          <UserCheck className="h-4 w-4" />
+                          {isBusy && busyAccountDecision === 'approve' ? 'Working...' : 'Approve'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {isAdmin && pendingRequests.length > 0 && (
+            <section aria-labelledby="group-request-heading">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <h2 id="group-request-heading" className="flex items-center gap-2 text-sm font-bold text-[var(--color-text)]">
+                    <UserPlus className="h-4 w-4 text-[var(--color-positive)]" />
+                    Group join requests
+                  </h2>
+                  <p className="mt-1 text-[10px] text-[var(--color-muted)]">Approve people who used this group's invite code.</p>
+                </div>
+                <span className="rounded-full bg-[var(--color-positive-soft)] px-2.5 py-1 text-[10px] font-bold text-[var(--color-positive)]">
+                  {pendingRequests.length}
+                </span>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                {pendingRequests.map(request => (
+                  <div
+                    key={request.id}
+                    id={`pending-member-card-${request.id}`}
+                    className="parite-card flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <MemberAvatar member={request} size="md" />
+                      <div className="min-w-0">
+                        <span className="block truncate text-sm font-bold text-[var(--color-text)]">{request.display_name}</span>
+                        <span className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[var(--color-muted)]">
+                          <Clock className="h-3 w-3" />
+                          {new Date(request.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:justify-end">
+                      <button
+                        type="button"
+                        id={`btn-view-spending-${request.id}`}
+                        onClick={() => onViewMemberSpending(request.id)}
+                        className="col-span-2 min-w-0 cursor-pointer rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-2.5 text-[10px] font-bold text-[var(--color-positive)] sm:col-span-1"
+                      >
+                        View spending
+                      </button>
+                      <button
+                        type="button"
+                        id={`btn-reject-request-${request.id}`}
+                        onClick={() => runMemberAction(request.id, 'reject', () => onRejectMember(request.id))}
+                        disabled={isMemberBusy(request.id) || !isTripActive}
+                        className="flex min-w-0 cursor-pointer items-center justify-center gap-1 rounded-xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] p-2.5 text-[10px] font-bold text-[var(--color-negative)]"
+                      >
+                        <UserX className="h-3.5 w-3.5" />
+                        <span>{busyMemberAction?.memberId === request.id && busyMemberAction.action === 'reject' ? 'Rejecting...' : 'Reject'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        id={`btn-approve-request-${request.id}`}
+                        onClick={() => runMemberAction(request.id, 'approve', () => onApproveMember(request.id))}
+                        disabled={isMemberBusy(request.id) || !isTripActive}
+                        className="flex min-w-0 cursor-pointer items-center justify-center gap-1 rounded-xl bg-[var(--color-positive)] p-2.5 text-[10px] font-bold text-white"
+                      >
+                        <UserCheck className="h-3.5 w-3.5" />
+                        <span>{busyMemberAction?.memberId === request.id && busyMemberAction.action === 'approve' ? 'Approving...' : 'Approve'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
         </section>
       )}
