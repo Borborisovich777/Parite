@@ -174,7 +174,7 @@ export const ExpenseVisualPicker: React.FC<ExpenseVisualPickerProps> = ({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-2">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-2">
           {EXPENSE_VISUAL_CATEGORIES.map(category => {
             const presets = getExpenseVisualPresetsForCategory(category.id);
 
