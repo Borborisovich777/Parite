@@ -12,6 +12,7 @@ interface MembersTabProps {
   currentMember: Member;
   members: Member[];
   accountRequests?: AccountAccess[];
+  accountRequestsError?: string | null;
   isPlatformAdmin?: boolean;
   busyAccountUserId?: string | null;
   busyAccountDecision?: 'approve' | 'reject' | null;
@@ -34,6 +35,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   currentMember,
   members,
   accountRequests = [],
+  accountRequestsError = null,
   isPlatformAdmin = false,
   busyAccountUserId = null,
   busyAccountDecision = null,
@@ -274,6 +276,16 @@ export const MembersTab: React.FC<MembersTabProps> = ({
               Inactive ({otherMembers.length})
             </button>
           )}
+        </div>
+      )}
+
+      {isPlatformAdmin && accountRequestsError && (
+        <div className="flex items-start gap-2 rounded-2xl border border-[var(--color-negative)]/20 bg-[var(--color-negative-soft)] px-3 py-2.5 text-xs text-[var(--color-negative)]">
+          <UserX className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-bold">Account requests could not be refreshed</p>
+            <p className="mt-0.5 leading-relaxed opacity-80">{accountRequestsError} Use the refresh button to try again.</p>
+          </div>
         </div>
       )}
 
