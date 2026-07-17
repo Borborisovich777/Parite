@@ -32,14 +32,22 @@ export interface WorkspaceSummary {
 type Row = Record<string, any>;
 
 export const DUPLICATE_DISPLAY_NAME_MESSAGE =
-  'Display name already used in this trip. Use another name or ask the admin to remove or reapprove the previous member.';
+  'Display name already used in this group. Use another name or ask the admin to remove or reapprove the previous member.';
 
 export const INVALID_MEMBER_SESSION_MESSAGE = 'Member session not found';
 export const SETTLEMENT_EXPENSE_GUARD_MESSAGE =
   'This expense was created before a paid settlement. Void the related settlement before changing it.';
 export const TRIP_CLOSING_READONLY_MESSAGE =
-  'This trip is being closed. Cancel the close request before making changes.';
-export const TRIP_CLOSED_READONLY_MESSAGE = 'This trip is closed and read-only.';
+  'This group is being closed. Cancel the close request before making changes.';
+export const TRIP_CLOSED_READONLY_MESSAGE = 'This group is closed and read-only.';
+
+function useGroupTerminology(message: string): string {
+  return message
+    .replace(/\bTrips\b/g, 'Groups')
+    .replace(/\btrips\b/g, 'groups')
+    .replace(/\bTrip\b/g, 'Group')
+    .replace(/\btrip\b/g, 'group');
+}
 
 function mapTrip(row: Row): Trip {
   return {
@@ -271,7 +279,7 @@ function throwSupabaseError(error: unknown): never {
       normalizedMessage.includes(message.toLowerCase())
     );
     if (friendlyMatch) {
-      throw new Error(friendlyMatch);
+      throw new Error(useGroupTerminology(friendlyMatch));
     }
 
     const messageParts = [
@@ -279,7 +287,7 @@ function throwSupabaseError(error: unknown): never {
     ].filter(Boolean);
 
     if (messageParts.length > 0) {
-      throw new Error(messageParts.join(' '));
+      throw new Error(useGroupTerminology(messageParts.join(' ')));
     }
   }
 

@@ -3,6 +3,7 @@ import { Trip, Member, Expense, ExpenseSplit, Settlement, ExchangeRate } from '.
 import { calculateOpenMemberBalances, calculateSettlementRecommendations } from '../lib/calculations';
 import { formatDisplayMoney, getMemberDisplayCurrency } from '../lib/exchangeRates';
 import { CheckCircle2, Clock, History, RotateCcw, Scale } from 'lucide-react';
+import { MemberAvatar } from './MemberAvatar';
 
 interface BalancesTabProps {
   trip: Trip;
@@ -40,34 +41,85 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   );
   const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
   const isTripClosed = (trip.status ?? 'active') === 'closed';
+  const currentBalance = balances.find(balance => balance.member_id === currentMember.id);
+  const currentNetBalance = currentBalance?.net_balance ?? 0;
+  const currentBalanceDisplay = formatDisplayMoney(
+    Math.abs(currentNetBalance),
+    trip.base_currency,
+    displayCurrency,
+    exchangeRates,
+    trip.id
+  );
+  const currentBalanceLabel = currentNetBalance > 0.01
+    ? 'You are owed'
+    : currentNetBalance < -0.01
+      ? 'You owe'
+      : 'You are all settled up';
 
   return (
-    <div className="flex flex-col gap-4 pb-24 md:pb-6 animate-fade-in px-4 pt-4 md:px-6 lg:px-8">
-      <div>
-        <h1 className="text-xl font-bold font-display text-white tracking-tight">
+    <div className="flex flex-col gap-5 px-4 pb-24 pt-5 animate-fade-in md:px-6 md:pb-6 lg:px-8">
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-positive)]">
+          {trip.name}
+        </p>
+        <h1 className="mt-1 text-2xl font-bold font-display text-[var(--color-text)] tracking-tight">
           Balances
         </h1>
-        <p className="text-xs text-slate-500 mt-1">
-          Who paid, who owes, and the simplest way to settle.
+        <p className="mt-1 text-xs leading-relaxed text-[var(--color-muted)]">
+          See what everyone covered and settle up in the fewest transfers.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] lg:items-start">
-      <section className="bg-[#1a1d23] border border-slate-800 rounded-3xl p-4 lg:sticky lg:top-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-bold text-slate-100">Member balances</h2>
-          <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-2 py-1">
-            {trip.base_currency}
+      <section className="header-wash flex items-center justify-between gap-4 rounded-3xl border border-[var(--color-border)] px-4 py-4 shadow-[var(--shadow-card)]">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-[var(--color-positive)] shadow-sm">
+            <Scale className="h-5 w-5" strokeWidth={2.4} />
           </span>
+          <div className="min-w-0">
+            <p className={`text-sm font-bold ${
+              currentNetBalance < -0.01 ? 'text-[var(--color-negative)]' : 'text-[var(--color-positive)]'
+            }`}>
+              {currentBalanceLabel}
+            </p>
+            <p className="mt-0.5 text-[11px] text-[var(--color-muted)]">
+              Across {expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'}
+            </p>
+          </div>
         </div>
+        <div className="shrink-0 text-right">
+          <p className={`font-mono text-xl font-bold tabular-nums ${
+            currentNetBalance < -0.01 ? 'text-[var(--color-negative)]' : 'text-[var(--color-text)]'
+          }`}>
+            {currentBalanceDisplay.primary}
+          </p>
+          {currentBalanceDisplay.secondary && (
+            <p className="mt-0.5 text-[10px] font-mono text-[var(--color-muted)]">
+              {currentBalanceDisplay.secondary}
+            </p>
+          )}
+        </div>
+      </section>
 
-        <div className="flex flex-col gap-2">
-          {balances.map(balance => {
+      <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] lg:items-start">
+        <section className="parite-card p-4 lg:sticky lg:top-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-bold text-[var(--color-text)]">Everyone's balance</h2>
+              <p className="mt-0.5 text-[10px] text-[var(--color-muted)]">Tap a person for their breakdown</p>
+            </div>
+            <span className="rounded-full border border-[var(--color-positive)]/15 bg-[var(--color-positive-soft)] px-2.5 py-1 text-[10px] font-mono font-bold text-[var(--color-positive)]">
+              {trip.base_currency}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            {balances.map(balance => {
             const isMe = balance.member_id === currentMember.id;
+            const balanceMember = members.find(member => member.id === balance.member_id);
             const isPositive = balance.net_balance > 0.01;
             const isNegative = balance.net_balance < -0.01;
             const balanceDisplay = formatDisplayMoney(
-              balance.net_balance,
+              Math.abs(balance.net_balance),
               trip.base_currency,
               displayCurrency,
               exchangeRates,
@@ -80,34 +132,44 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                 key={balance.member_id}
                 id={`balance-row-${balance.member_id}`}
                 onClick={() => onViewMemberBreakdown(balance.member_id)}
-                className={`rounded-2xl border p-3 flex items-center justify-between gap-3 text-left cursor-pointer hover:border-indigo-500/40 ${
-                  isMe ? 'bg-indigo-500/10 border-indigo-500/25' : 'bg-[#121418] border-slate-800'
+                className={`flex items-center justify-between gap-3 rounded-2xl border p-3 text-left cursor-pointer transition-colors ${
+                  isMe
+                    ? 'border-[var(--color-positive)]/20 bg-[var(--color-positive-soft)]'
+                    : 'border-transparent bg-[var(--color-surface-soft)] hover:border-[var(--color-border)]'
                 }`}
               >
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-100 truncate">
-                    {balance.display_name}{isMe ? ' (You)' : ''}
-                  </p>
-                  <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                    Paid {balance.total_paid.toFixed(2)} / share {balance.total_owed.toFixed(2)}
-                  </p>
-                  <span className="mt-2 inline-flex rounded-full border border-slate-800 bg-[#121418] px-2 py-1 text-[10px] font-bold text-indigo-300">
-                    View breakdown
-                  </span>
+                <div className="flex min-w-0 items-center gap-3">
+                  <MemberAvatar member={balanceMember} size="md" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-[var(--color-text)]">
+                      {balance.display_name}{isMe ? ' (You)' : ''}
+                    </p>
+                    <p className="mt-1 text-[10px] font-mono text-[var(--color-muted)]">
+                      Paid {balance.total_paid.toFixed(2)} · Share {balance.total_owed.toFixed(2)}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="text-right shrink-0">
+                  <p className={`mb-1 text-[9px] font-bold uppercase tracking-wide ${
+                    isPositive
+                      ? 'text-[var(--color-positive)]'
+                      : isNegative
+                        ? 'text-[var(--color-negative)]'
+                        : 'text-[var(--color-muted)]'
+                  }`}>
+                    {isPositive ? 'Gets back' : isNegative ? 'Owes' : 'Settled'}
+                  </p>
                   <div
                     id={`member-net-balance-${balance.member_id}`}
-                    className={`font-mono text-xs font-bold px-2.5 py-1.5 rounded-xl ${
+                    className={`font-mono text-sm font-bold tabular-nums ${
                       isPositive
-                        ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                        ? 'text-[var(--color-positive)]'
                         : isNegative
-                        ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700'
+                        ? 'text-[var(--color-negative)]'
+                        : 'text-[var(--color-muted)]'
                     }`}
                   >
-                    {isPositive ? '+' : ''}
                     {balanceDisplay.primary}
                     {balanceDisplay.secondary && (
                       <span className="block text-[9px] font-mono font-medium opacity-70 mt-0.5">
@@ -116,31 +178,31 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                     )}
                   </div>
                   {balanceDisplay.helper && (
-                    <p className="text-[10px] text-slate-500 mt-1 max-w-[8rem]">
+                    <p className="mt-1 max-w-[8rem] text-[10px] text-[var(--color-muted)]">
                       {balanceDisplay.helper}
                     </p>
                   )}
                 </div>
               </button>
             );
-          })}
-        </div>
-      </section>
+            })}
+          </div>
+        </section>
 
-      <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-1.5 bg-[#1a1d23] border border-slate-800 p-1 rounded-2xl">
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1">
         <button
           type="button"
           onClick={() => setActiveSubTab('recommendations')}
-          className={`min-h-11 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+          className={`min-h-11 rounded-xl px-2 text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'recommendations'
-              ? 'bg-indigo-600 text-slate-950'
-              : 'text-slate-500 hover:text-slate-300'
+              ? 'bg-white text-[var(--color-positive)] shadow-sm'
+              : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
           }`}
         >
           To settle
           {recommendations.length > 0 && (
-            <span className="ml-1.5 bg-rose-500 text-slate-950 text-[9px] px-1.5 rounded-full">
+            <span className="ml-1.5 rounded-full bg-[var(--color-negative)] px-1.5 text-[9px] text-[#fff]">
               {recommendations.length}
             </span>
           )}
@@ -149,28 +211,30 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           type="button"
           id="btn-settlement-history-tab"
           onClick={() => setActiveSubTab('history')}
-          className={`min-h-11 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+          className={`min-h-11 rounded-xl px-2 text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'history'
-              ? 'bg-indigo-600 text-slate-950'
-              : 'text-slate-500 hover:text-slate-300'
+              ? 'bg-white text-[var(--color-positive)] shadow-sm'
+              : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
           }`}
         >
           Settlement history
           {settlementHistoryList.length > 0 && (
-            <span className="ml-1.5 bg-slate-700 text-slate-100 text-[9px] px-1.5 rounded-full">
+            <span className="ml-1.5 rounded-full bg-white px-1.5 text-[9px] text-[var(--color-muted)]">
               {settlementHistoryList.length}
             </span>
           )}
         </button>
-      </div>
+          </div>
 
-      {activeSubTab === 'recommendations' ? (
+          {activeSubTab === 'recommendations' ? (
         <section className="flex flex-col gap-2">
           {recommendations.length === 0 ? (
-            <div className="text-center py-12 px-4 bg-emerald-500/5 border border-dashed border-emerald-500/20 rounded-3xl">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-              <p className="text-sm font-bold text-emerald-300">All settled up</p>
-              <p className="text-xs text-slate-500 mt-1">
+            <div className="rounded-3xl border border-dashed border-[var(--color-positive)]/20 bg-[var(--color-positive-soft)] px-4 py-12 text-center">
+              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/80 text-[var(--color-positive)] shadow-sm">
+                <CheckCircle2 className="h-6 w-6" />
+              </span>
+              <p className="text-sm font-bold text-[var(--color-positive)]">All settled up</p>
+              <p className="mt-1 text-xs text-[var(--color-muted)]">
                 No settlement transfers are needed right now.
               </p>
             </div>
@@ -181,6 +245,8 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
               const canConfirmSettlement = !isTripClosed && (isAdmin || isReceiver);
               const confirmLabel = isReceiver && !isAdmin ? 'Confirm received' : 'Mark as paid';
               const settlementKey = `${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`;
+              const fromMember = members.find(member => member.id === recommendation.from_member_id);
+              const toMember = members.find(member => member.id === recommendation.to_member_id);
               const recommendationDisplay = formatDisplayMoney(
                 recommendation.amount,
                 trip.base_currency,
@@ -193,35 +259,41 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                 <div
                   key={settlementKey}
                   id={`recommendation-card-${index}`}
-                  className="bg-[#1a1d23] border border-slate-800 rounded-3xl p-4 flex flex-col gap-3"
+                  className="parite-card flex flex-col gap-3 p-4"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-200 leading-relaxed">
-                        <strong className="text-rose-300">{recommendation.from_display_name}</strong>
-                        {' pays '}
-                        <strong className="text-emerald-300">{recommendation.to_display_name}</strong>
-                      </p>
-                      <p className="text-[10px] text-slate-500 mt-1">
-                        Recommended settlement
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex shrink-0 -space-x-2">
+                        <MemberAvatar member={fromMember} size="sm" className="ring-2 ring-white" />
+                        <MemberAvatar member={toMember} size="sm" className="ring-2 ring-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm leading-relaxed text-[var(--color-text)]">
+                          <strong className="text-[var(--color-negative)]">{recommendation.from_display_name}</strong>
+                          {' pays '}
+                          <strong className="text-[var(--color-positive)]">{recommendation.to_display_name}</strong>
+                        </p>
+                        <p className="mt-1 text-[10px] text-[var(--color-muted)]">
+                          Recommended settlement
+                        </p>
+                      </div>
                     </div>
 
                     <div className="text-right shrink-0">
-                      <p className="font-mono text-base font-bold text-white">
+                      <p className="font-mono text-base font-bold text-[var(--color-text)] tabular-nums">
                         {recommendationDisplay.primary}
                       </p>
                       {recommendationDisplay.secondary ? (
-                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        <p className="mt-0.5 text-[10px] font-mono text-[var(--color-muted)]">
                           {recommendationDisplay.secondary}
                         </p>
                       ) : (
-                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        <p className="mt-0.5 text-[10px] font-mono text-[var(--color-muted)]">
                           {recommendation.currency}
                         </p>
                       )}
                       {recommendationDisplay.helper && (
-                        <p className="text-[10px] text-slate-500 mt-0.5">
+                        <p className="mt-0.5 text-[10px] text-[var(--color-muted)]">
                           {recommendationDisplay.helper}
                         </p>
                       )}
@@ -247,14 +319,14 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                         }
                       }}
                       disabled={busySettlementKey === settlementKey}
-                      className="min-h-11 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-slate-950 font-bold text-xs px-4 rounded-2xl flex items-center justify-center gap-2 cursor-pointer"
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--color-positive)] px-4 text-xs font-bold text-[#fff] cursor-pointer disabled:opacity-60"
                     >
                       <CheckCircle2 className="w-4 h-4" />
                       {busySettlementKey === settlementKey ? 'Confirming...' : confirmLabel}
                     </button>
                   ) : (
-                    <p className="text-xs text-slate-500 leading-normal">
-                      The receiver or a trip admin can confirm this settlement after the transfer is complete.
+                    <p className="rounded-2xl bg-[var(--color-surface-soft)] px-3 py-2.5 text-xs leading-normal text-[var(--color-muted)]">
+                    The receiver or a group admin can confirm this settlement after the transfer is complete.
                     </p>
                   )}
                 </div>
@@ -265,10 +337,12 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
       ) : (
         <section className="flex flex-col gap-2">
           {settlementHistoryList.length === 0 ? (
-            <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-3xl bg-[#1a1d23]">
-              <History className="w-9 h-9 text-slate-700 mx-auto mb-3" />
-              <p className="text-sm text-slate-300 font-semibold">No settlement history yet</p>
-              <p className="text-xs text-slate-500 mt-1">Paid and voided transfers will appear here.</p>
+            <div className="rounded-3xl border border-dashed border-[var(--color-border)] bg-white px-4 py-12 text-center">
+              <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-surface-soft)] text-[var(--color-muted)]">
+                <History className="h-5 w-5" />
+              </span>
+              <p className="text-sm font-semibold text-[var(--color-text)]">No settlement history yet</p>
+              <p className="mt-1 text-xs text-[var(--color-muted)]">Paid and voided transfers will appear here.</p>
             </div>
           ) : (
             [...settlementHistoryList]
@@ -292,37 +366,43 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                   <div
                     key={settlement.id}
                     id={`historic-settlement-${settlement.id}`}
-                    className="bg-[#1a1d23] border border-slate-800 rounded-2xl p-4 flex flex-col gap-3"
+                    className="parite-card flex flex-col gap-3 p-4"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm text-slate-200 leading-relaxed">
-                          <strong>{fromMember ? fromMember.display_name : 'Removed member'}</strong>
-                          {' paid '}
-                          <strong>{toMember ? toMember.display_name : 'Removed member'}</strong>
-                        </p>
-                        <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1 mt-1">
-                          <Clock className="w-3 h-3" />
-                          {settlement.paid_at ? new Date(settlement.paid_at).toLocaleDateString() : 'No date'}
-                        </p>
-                        {isVoided && (
-                          <p className="text-[10px] text-rose-300 mt-1">
-                            Voided{settlement.void_reason ? `: ${settlement.void_reason}` : ''}
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex shrink-0 -space-x-2">
+                          <MemberAvatar member={fromMember} size="sm" className="ring-2 ring-white" />
+                          <MemberAvatar member={toMember} size="sm" className="ring-2 ring-white" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm leading-relaxed text-[var(--color-text)]">
+                            <strong>{fromMember ? fromMember.display_name : 'Removed member'}</strong>
+                            {' paid '}
+                            <strong>{toMember ? toMember.display_name : 'Removed member'}</strong>
                           </p>
-                        )}
+                          <p className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[var(--color-muted)]">
+                            <Clock className="w-3 h-3" />
+                            {settlement.paid_at ? new Date(settlement.paid_at).toLocaleDateString() : 'No date'}
+                          </p>
+                          {isVoided && (
+                            <p className="mt-1 text-[10px] text-[var(--color-negative)]">
+                              Voided{settlement.void_reason ? `: ${settlement.void_reason}` : ''}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       <div className={`text-right font-mono font-bold text-xs shrink-0 ${
-                        isVoided ? 'text-slate-500 line-through' : 'text-emerald-300'
+                        isVoided ? 'text-[var(--color-muted)] line-through' : 'text-[var(--color-positive)]'
                       }`}>
                         {settlementDisplay.primary}
                         {settlementDisplay.secondary && (
-                          <span className="block text-[10px] text-slate-500 mt-0.5">
+                          <span className="mt-0.5 block text-[10px] text-[var(--color-muted)]">
                             {settlementDisplay.secondary}
                           </span>
                         )}
                         {isVoided && (
-                          <span className="block text-[10px] text-rose-300 mt-1 no-underline">
+                          <span className="mt-1 block text-[10px] text-[var(--color-negative)] no-underline">
                             Voided
                           </span>
                         )}
@@ -347,7 +427,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                           }
                         }}
                         disabled={busySettlementKey === `void-${settlement.id}`}
-                        className="min-h-10 rounded-2xl bg-[var(--color-negative)] text-slate-950 disabled:opacity-60 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        className="flex min-h-10 items-center justify-center gap-2 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-xs font-bold text-[var(--color-negative)] cursor-pointer disabled:opacity-60"
                       >
                         <RotateCcw className="w-4 h-4" />
                         {busySettlementKey === `void-${settlement.id}` ? 'Voiding...' : 'Void settlement'}
@@ -358,8 +438,8 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
               })
           )}
         </section>
-      )}
-      </div>
+          )}
+        </div>
       </div>
     </div>
   );
