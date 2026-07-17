@@ -8,6 +8,7 @@ import { SideMenu } from './components/SideMenu';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
 import { MemberBreakdownSheet } from './components/MemberBreakdownSheet';
 import { LandingPage } from './components/LandingPage';
+import { UiPreview } from './components/UiPreview';
 import { Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
 import {
@@ -63,7 +64,7 @@ const LEGACY_MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
 const LEGACY_ACTIVE_MEMBER_ID_KEY = 'tripbalance_active_member_id';
 const ACTIVE_MEMBER_ID_KEY = 'parite_active_member_id';
 
-export default function App() {
+function PariteApp() {
   const [workspace, setWorkspace] = useState<PhaseOneWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('expenses');
@@ -187,7 +188,7 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setWorkspaces([]);
-      setAppError(error instanceof Error ? error.message : 'Could not load your trips.');
+      setAppError(error instanceof Error ? error.message : 'Could not load your groups.');
       return [];
     } finally {
       setIsWorkspaceLoading(false);
@@ -216,7 +217,7 @@ export default function App() {
       console.error(error);
       setWorkspace(null);
       clearActiveMemberId();
-      setAppError(error instanceof Error ? error.message : 'Could not load your trip access.');
+      setAppError(error instanceof Error ? error.message : 'Could not load your group access.');
       return null;
     } finally {
       if (options.setLoading) {
@@ -278,7 +279,7 @@ export default function App() {
         console.error(error);
         if (!cancelled) {
           setWorkspace(null);
-          setAppError(error instanceof Error ? error.message : 'Could not restore your trip access.');
+          setAppError(error instanceof Error ? error.message : 'Could not restore your group access.');
         }
       } finally {
         if (!cancelled) {
@@ -392,7 +393,7 @@ export default function App() {
     setActionError(null);
 
     if (!newTripName.trim()) {
-      setCreateTripError('Trip name is required');
+      setCreateTripError('Group name is required');
       return;
     }
     if (!newTripAdminName.trim()) {
@@ -416,7 +417,7 @@ export default function App() {
       setActiveTab('expenses');
     } catch (error) {
       console.error(error);
-      setCreateTripError(error instanceof Error ? error.message : 'Could not create trip.');
+      setCreateTripError(error instanceof Error ? error.message : 'Could not create group.');
     }
   };
 
@@ -450,7 +451,7 @@ export default function App() {
 
   const runAdminAction = async (action: () => Promise<void>) => {
     if (!currentMember) {
-      throw new Error('Trip member is not loaded.');
+      throw new Error('Group member is not loaded.');
     }
 
     setActionError(null);
@@ -483,7 +484,7 @@ export default function App() {
 
   const handleDemoteAdmin = async (memberId: string) => {
     if (!currentMember) {
-      throw new Error('Trip member is not loaded.');
+      throw new Error('Group member is not loaded.');
     }
 
     setActionError(null);
@@ -500,7 +501,7 @@ export default function App() {
 
   const getExportContext = () => {
     if (!activeTrip || !currentMember || currentMember.status !== 'approved') {
-      throw new Error('Approved trip access is required to export CSV files.');
+      throw new Error('Approved group access is required to export CSV files.');
     }
 
     return {
@@ -543,7 +544,7 @@ export default function App() {
 
   const handleLeaveTrip = async () => {
     if (!currentMember) {
-      throw new Error('Trip member is not loaded.');
+      throw new Error('Group member is not loaded.');
     }
 
     setActionError(null);
@@ -556,13 +557,13 @@ export default function App() {
       await refreshWorkspaces();
     } catch (error) {
       console.error(error);
-      setActionErrorFromUnknown(error, 'Could not leave trip.');
+      setActionErrorFromUnknown(error, 'Could not leave group.');
       throw error;
     }
   };
 
   const handleStartTripClosure = async () => {
-    if (!activeTrip) throw new Error('Trip is not loaded.');
+    if (!activeTrip) throw new Error('Group is not loaded.');
 
     setActionError(null);
     try {
@@ -577,7 +578,7 @@ export default function App() {
   };
 
   const handleApproveTripClosure = async () => {
-    if (!activeTrip) throw new Error('Trip is not loaded.');
+    if (!activeTrip) throw new Error('Group is not loaded.');
 
     setActionError(null);
     try {
@@ -592,7 +593,7 @@ export default function App() {
   };
 
   const handleCancelTripClosure = async () => {
-    if (!activeTrip) throw new Error('Trip is not loaded.');
+    if (!activeTrip) throw new Error('Group is not loaded.');
 
     setActionError(null);
     try {
@@ -607,7 +608,7 @@ export default function App() {
   };
 
   const handleRegenerateTripInviteCode = async () => {
-    if (!activeTrip) throw new Error('Trip is not loaded.');
+    if (!activeTrip) throw new Error('Group is not loaded.');
 
     setActionError(null);
     try {
@@ -622,7 +623,7 @@ export default function App() {
   };
 
   const handleUpdateTripName = async (name: string) => {
-    if (!activeTrip) throw new Error('Trip is not loaded.');
+    if (!activeTrip) throw new Error('Group is not loaded.');
 
     setActionError(null);
     try {
@@ -631,7 +632,7 @@ export default function App() {
       await refreshWorkspaces();
     } catch (error) {
       console.error(error);
-      setActionErrorFromUnknown(error, 'Could not rename trip.');
+      setActionErrorFromUnknown(error, 'Could not rename group.');
       throw error;
     }
   };
@@ -642,17 +643,17 @@ export default function App() {
     rate: number
   ) => {
     if (!activeTrip) {
-      throw new Error('Trip access is not loaded.');
+      throw new Error('Group access is not loaded.');
     }
 
     if (!currentMember || currentMember.role !== 'admin' || currentMember.status !== 'approved') {
-      const message = 'Only trip admins can update exchange rates.';
+      const message = 'Only group admins can update exchange rates.';
       setActionError(message);
       throw new Error(message);
     }
 
     if ((activeTrip.status ?? 'active') !== 'active') {
-      const message = 'This trip is read-only. Exchange rates can still be viewed.';
+      const message = 'This group is read-only. Exchange rates can still be viewed.';
       setActionError(message);
       throw new Error(message);
     }
@@ -670,7 +671,7 @@ export default function App() {
 
   const handleUpdateDisplayCurrency = async (displayCurrency: Currency | null) => {
     if (!currentMember) {
-      throw new Error('Trip member is not loaded.');
+      throw new Error('Group member is not loaded.');
     }
 
     try {
@@ -720,7 +721,7 @@ export default function App() {
     feeInput?: ExpenseFeeInput | null
   ) => {
     if (!activeTrip || !currentMember) {
-      throw new Error('Trip access is not loaded.');
+      throw new Error('Group access is not loaded.');
     }
 
     try {
@@ -803,7 +804,7 @@ export default function App() {
     amount: number
   ) => {
     if (!activeTrip || !currentMember) {
-      throw new Error('Trip access is not loaded.');
+      throw new Error('Group access is not loaded.');
     }
 
     try {
@@ -840,7 +841,7 @@ export default function App() {
     try {
       const nextWorkspace = await loadAuthWorkspace(memberId);
       if (!nextWorkspace.currentMember) {
-        throw new Error('Could not load that trip.');
+        throw new Error('Could not load that group.');
       }
       applyWorkspace(nextWorkspace);
       await refreshWorkspaces();
@@ -855,7 +856,7 @@ export default function App() {
       console.error(error);
       clearActiveMemberId();
       setWorkspace(null);
-      setActionErrorFromUnknown(error, 'Could not switch trips.');
+      setActionErrorFromUnknown(error, 'Could not switch groups.');
     } finally {
       setIsWorkspaceLoading(false);
     }
@@ -931,7 +932,7 @@ export default function App() {
               {authMode === 'signup' ? 'Create your account' : 'Log in to continue'}
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-2 leading-relaxed">
-              Sign in to keep your trip access across browsers and devices.
+              Sign in to keep your group access across browsers and devices.
             </p>
           </div>
 
@@ -1096,7 +1097,7 @@ export default function App() {
           Parité
         </h1>
         <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
-          Select a trip or start a new shared workspace.
+          Select a group or start a new shared workspace.
         </p>
       </div>
 
@@ -1107,19 +1108,19 @@ export default function App() {
       <section className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
         <div className="border-b border-slate-800 pb-2.5">
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Select a trip
+            Select a group
           </h2>
         </div>
 
         {isWorkspaceLoading && (
-          <p className="text-xs text-slate-500">Loading trips...</p>
+          <p className="text-xs text-slate-500">Loading groups...</p>
         )}
 
         {!isWorkspaceLoading && workspaces.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-800 bg-[#121418] px-4 py-8 text-center">
-            <p className="text-sm font-bold text-slate-200">No trips yet.</p>
+            <p className="text-sm font-bold text-slate-200">No groups yet.</p>
             <p className="text-xs text-slate-500 mt-1">
-              Create a trip or join one with an invite code.
+              Create a group or join one with an invite code.
             </p>
           </div>
         ) : (
@@ -1165,7 +1166,7 @@ export default function App() {
           className="min-h-12 rounded-2xl bg-indigo-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          Create trip
+          Create group
         </button>
         <button
           type="button"
@@ -1174,7 +1175,7 @@ export default function App() {
           className="min-h-12 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <UserPlus className="w-4 h-4" />
-          Join trip
+          Join group
         </button>
       </div>
     </div>
@@ -1292,7 +1293,7 @@ export default function App() {
           )}
 
           {isSupabaseConfigured && !isBootstrapping && authUser && appError && !activeTrip && renderCenteredMessage(
-            'Could not restore trip access',
+            'Could not restore group access',
             appError
           )}
 
@@ -1316,10 +1317,10 @@ export default function App() {
                   <Compass className="w-8 h-8 text-white stroke-[2.5]" />
                 </div>
                 <h1 className="text-2xl font-bold font-display text-white tracking-tight">
-                  Join trip
+                  Join group
                 </h1>
                 <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
-                  Enter an invite code and your trip display name.
+                  Enter an invite code and your group display name.
                 </p>
               </div>
 
@@ -1328,7 +1329,7 @@ export default function App() {
               <form onSubmit={handleJoinTripSubmit} className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
                 <div className="border-b border-slate-800 pb-2.5">
                   <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Join Shared Trip
+                    Join Shared Group
                   </h2>
                 </div>
 
@@ -1377,7 +1378,7 @@ export default function App() {
                   className="w-full bg-indigo-600 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Request Trip Access</span>
+                  <span>Request Group Access</span>
                 </button>
               </form>
 
@@ -1399,10 +1400,10 @@ export default function App() {
 
               <div>
                 <h1 className="text-2xl font-bold font-display text-white tracking-tight">
-                  Create trip
+                  Create group
                 </h1>
                 <p className="text-xs text-slate-400 mt-1">
-                  Start a shared trip space and invite your group.
+                  Start a shared expense group and invite members.
                 </p>
               </div>
 
@@ -1418,7 +1419,7 @@ export default function App() {
               <form onSubmit={handleCreateTripSubmit} className="bg-[#1a1d23] border border-slate-800/60 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Trip Name *
+                    Group Name *
                   </label>
                   <input
                     type="text"
@@ -1426,7 +1427,7 @@ export default function App() {
                     id="input-create-trip-name"
                     value={newTripName}
                     onChange={event => setNewTripName(event.target.value)}
-                    placeholder="e.g. Zaysan Trip"
+                    placeholder="e.g. Zaysan Group"
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -1463,7 +1464,7 @@ export default function App() {
                     ))}
                   </select>
                   <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                    Trip base currency is used for calculations. You can still view your personal amounts in another currency later.
+                    Group base currency is used for calculations. You can still view your personal amounts in another currency later.
                   </p>
                 </div>
 
@@ -1472,7 +1473,7 @@ export default function App() {
                   id="btn-create-trip-submit"
                   className="w-full bg-indigo-600 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-2 text-center cursor-pointer"
                 >
-                  Create Trip
+                  Create Group
                 </button>
               </form>
             </div>
@@ -1496,7 +1497,7 @@ export default function App() {
                 onClick={handleShowTripSelection}
                 className="w-full max-w-xs bg-[#1a1d23] hover:bg-[#20242b] text-slate-300 font-bold border border-slate-800 py-3 rounded-xl text-xs cursor-pointer"
               >
-                Switch trip
+                Switch group
               </button>
             </div>
           )}
@@ -1519,7 +1520,7 @@ export default function App() {
                 onClick={handleShowTripSelection}
                 className="w-full max-w-xs bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold py-3 rounded-xl text-xs cursor-pointer"
               >
-                Switch trip
+                Switch group
               </button>
             </div>
           )}
@@ -1532,7 +1533,7 @@ export default function App() {
               <div>
                 <h1 className="text-lg font-bold text-white font-display">Member removed</h1>
                 <p className="text-xs text-slate-400 mt-2 max-w-xs leading-normal">
-                  You have been removed from this trip by an admin.
+                  You have been removed from this group by an admin.
                 </p>
               </div>
               {renderAccountStrip()}
@@ -1542,14 +1543,14 @@ export default function App() {
                 onClick={handleShowTripSelection}
                 className="w-full max-w-xs bg-[#1a1d23] hover:bg-[#20242b] border border-slate-800 text-slate-200 font-bold py-3 rounded-xl text-xs cursor-pointer"
               >
-                Switch trip
+                Switch group
               </button>
             </div>
           )}
 
           {currentMember && currentMember.status === 'approved' && !activeTrip && renderCenteredMessage(
-            'Trip access unavailable',
-            'Your member session is approved, but the trip data could not be loaded.'
+            'Group access unavailable',
+            'Your member session is approved, but the group data could not be loaded.'
           )}
 
           {activeTrip && currentMember && currentMember.status === 'approved' && (
@@ -1558,7 +1559,7 @@ export default function App() {
 
               {!actionError && isWorkspaceLoading && (
                 <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400 flex items-start gap-2">
-                  <span className="flex-1">Loading the latest trip data...</span>
+                  <span className="flex-1">Loading the latest group data...</span>
                 </div>
               )}
 
@@ -1633,4 +1634,11 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+export default function App() {
+  const isUiPreview = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('preview') === 'ui';
+
+  return isUiPreview ? <UiPreview /> : <PariteApp />;
 }

@@ -22,6 +22,17 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
+import { MemberAvatar } from './MemberAvatar';
+import { ExpenseIcon } from './ExpenseIcon';
+import { ExpenseVisualPicker } from './ExpenseVisualPicker';
+import {
+  getExpenseVisualCategory,
+  getExpenseVisualPreset,
+  readExpenseVisualPreference,
+  resolveExpenseVisual,
+  writeExpenseVisualPreference,
+  type ExpenseVisualId,
+} from '../lib/expenseVisuals';
 
 interface ExpensesTabProps {
   trip: Trip;
@@ -66,6 +77,36 @@ interface ExpensesTabProps {
 }
 
 type FormStep = 'basic' | 'preview';
+type ExpenseListFilter = 'all' | 'mine';
+interface ExpenseDateGroup {
+  dateKey: string;
+  label: string;
+  expenses: Expense[];
+}
+
+const toLocalDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getExpenseDateGroupLabel = (dateKey: string) => {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (dateKey === toLocalDateKey(today)) return 'Today';
+  if (dateKey === toLocalDateKey(yesterday)) return 'Yesterday';
+
+  const parsedDate = new Date(`${dateKey}T00:00:00`);
+  return parsedDate.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: parsedDate.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+  });
+};
 
 export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   trip,
@@ -94,12 +135,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   );
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [expenseListFilter, setExpenseListFilter] = useState<ExpenseListFilter>('all');
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [formStep, setFormStep] = useState<FormStep>('basic');
   const [showCustomizeSplit, setShowCustomizeSplit] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
 
   const [formTitle, setFormTitle] = useState('');
+  const [formVisualId, setFormVisualId] = useState<ExpenseVisualId | null>(null);
   const [formAmount, setFormAmount] = useState('');
   const [isServiceFeeEnabled, setIsServiceFeeEnabled] = useState(false);
   const [feePercentInput, setFeePercentInput] = useState('');
@@ -239,12 +282,28 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   );
 
   const filteredExpenses = expenses.filter(expense => {
+    const isCurrentMemberPayer = expense.paid_by_member_id === currentMember.id;
+    const hasCurrentMemberSplit = splits.some(split =>
+      split.expense_id === expense.id && split.member_id === currentMember.id
+    );
+    if (expenseListFilter === 'mine' && !isCurrentMemberPayer && !hasCurrentMemberSplit) {
+      return false;
+    }
+
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
 
     const paidByMember = approvedMembers.find(m => m.id === expense.paid_by_member_id);
+    const visual = resolveExpenseVisual(
+      expense.title,
+      readExpenseVisualPreference(trip.id, expense.title),
+    );
+    const visualCategory = getExpenseVisualCategory(visual.categoryId);
     const searchable = [
       expense.title,
+      visual.label,
+      visualCategory.label,
+      visualCategory.shortLabel,
       expense.notes ?? '',
       paidByMember?.display_name ?? '',
       expense.amount.toString(),
@@ -263,12 +322,38 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     return searchable.includes(q);
   }).sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime());
 
+  const groupedExpenses: ExpenseDateGroup[] = filteredExpenses.reduce((groups: ExpenseDateGroup[], expense: Expense) => {
+    const currentGroup = groups.at(-1);
+    if (currentGroup?.dateKey === expense.expense_date) {
+      currentGroup.expenses.push(expense);
+      return groups;
+    }
+
+    groups.push({
+      dateKey: expense.expense_date,
+      label: getExpenseDateGroupLabel(expense.expense_date),
+      expenses: [expense],
+    });
+    return groups;
+  }, [] as ExpenseDateGroup[]);
+
   const detailExpense = expenses.find(e => e.id === selectedExpenseIdForDetail);
+  const detailVisual = detailExpense
+    ? resolveExpenseVisual(
+      detailExpense.title,
+      readExpenseVisualPreference(trip.id, detailExpense.title),
+    )
+    : null;
+  const detailVisualCategory = detailVisual
+    ? getExpenseVisualCategory(detailVisual.categoryId)
+    : null;
   const detailSplits = detailExpense ? splits.filter(s => s.expense_id === detailExpense.id) : [];
   const detailPayer = detailExpense ? approvedMembers.find(m => m.id === detailExpense.paid_by_member_id) : null;
   const detailDisplayAmount = detailExpense
     ? formatDisplayMoney(detailExpense.converted_amount, tripBaseCurrency, displayCurrency, safeExchangeRates, trip.id)
     : null;
+  const formVisual = resolveExpenseVisual(formTitle, formVisualId);
+  const formVisualCategory = getExpenseVisualCategory(formVisual.categoryId);
 
   useEffect(() => {
     if (formCurrency === tripBaseCurrency && (useCustomExchangeRate || customExchangeRateInput)) {
@@ -301,7 +386,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const closeForm = () => {
     onSetAddingExpense(false);
     setEditingExpense(null);
+    setFormVisualId(null);
     resetFormView('close-form');
+  };
+
+  const handleSelectExpenseVisual = (visualId: ExpenseVisualId) => {
+    setFormVisualId(visualId);
+    if (!formTitle.trim()) {
+      const selectedVisual = getExpenseVisualPreset(visualId);
+      if (selectedVisual) setFormTitle(selectedVisual.label);
+    }
   };
 
   const handleOpenAddForm = () => {
@@ -309,6 +403,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
     const activeIds = approvedMembers.map(m => m.id);
     setFormTitle('');
+    setFormVisualId(null);
     setFormAmount('');
     setIsServiceFeeEnabled(false);
     setFeePercentInput('');
@@ -363,6 +458,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
     setEditingExpense(expense);
     setFormTitle(expense.title);
+    setFormVisualId(readExpenseVisualPreference(trip.id, expense.title));
     setFormAmount(expenseSubtotal.toString());
     setIsServiceFeeEnabled(hasExpenseFee);
     setFeePercentInput(hasExpenseFee ? expenseFeePercent.toString() : '');
@@ -429,7 +525,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     if (formCurrency !== tripBaseCurrency && !hasValidRate) {
       setBlockingError(useCustomExchangeRate
         ? 'Enter a custom exchange rate greater than zero'
-        : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
+        : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
       );
       setFormStepWithReason('preview', 'continue-missing-rate');
       return;
@@ -492,7 +588,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     if (exchangeRate === null || !Number.isFinite(exchangeRate) || exchangeRate <= 0) {
       setBlockingError(useCustomExchangeRate
         ? 'Exchange rate must be greater than zero'
-        : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
+        : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
       );
       setFormStepWithReason('preview', 'submit-invalid-rate');
       submitSourceRef.current = null;
@@ -538,6 +634,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         );
       }
 
+      if (formVisualId) {
+        writeExpenseVisualPreference(trip.id, formTitle.trim(), formVisualId);
+      }
+
       closeForm();
     } catch (error) {
       console.error(error);
@@ -579,9 +679,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const isFormOpen = isAddingExpense || Boolean(editingExpense);
   const readOnlyMessage = (trip.status ?? 'active') === 'closed'
-    ? 'This trip is closed and read-only. Expenses can still be viewed, but they cannot be added, edited, or deleted.'
-    : 'This trip is being closed. Cancel the close request before changing expenses.';
+    ? 'This group is closed and read-only. Expenses can still be viewed, but they cannot be added, edited, or deleted.'
+    : 'This group is being closed. Cancel the close request before changing expenses.';
   const payerName = approvedMembers.find(member => member.id === formPayer)?.display_name ?? 'Unknown';
+  const formPayerMember = approvedMembers.find(member => member.id === formPayer);
   const participantSummary = formParticipants.length === approvedMembers.length
     ? 'Everyone'
     : `${formParticipants.length} people`;
@@ -604,28 +705,31 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         ? `Using custom rate: 1 ${formCurrency} = ${activeExchangeRate.toString()} ${tripBaseCurrency}`
         : 'Enter a custom exchange rate'
       : tripExchangeRate
-        ? `Using trip rate: 1 ${formCurrency} = ${tripExchangeRate.toString()} ${tripBaseCurrency}`
-        : `No trip exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
+        ? `Using group rate: 1 ${formCurrency} = ${tripExchangeRate.toString()} ${tripBaseCurrency}`
+        : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
 
   return (
-    <div className="flex flex-col h-full pb-20 md:pb-0 animate-fade-in relative">
+    <div className={`relative flex h-full flex-col pb-20 md:pb-0 ${isFormOpen ? '' : 'animate-fade-in'}`}>
       {isFormOpen ? (
-        <form onSubmit={handleFormSubmit} className="flex min-h-full flex-col bg-[#121418]">
-          <div className="sticky top-0 z-10 bg-[#121418]/95 backdrop-blur border-b border-slate-800 px-4 py-3 md:px-6 lg:px-8 flex items-center justify-between gap-3">
+        <form
+          onSubmit={handleFormSubmit}
+          className="fixed inset-0 z-[70] mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[#f5f7f4] md:absolute md:z-50 md:h-full md:max-w-none"
+        >
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-black/10 bg-white/95 px-4 py-3 backdrop-blur md:px-6 lg:px-8">
             <button
               type="button"
               onClick={closeForm}
-              className="w-10 h-10 rounded-xl bg-[#1a1d23] border border-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-black/10 bg-white text-slate-600 transition active:scale-95"
               aria-label="Cancel expense form"
             >
               <X className="w-5 h-5" />
             </button>
             <div className="min-w-0 text-center">
-              <h2 id="expense-form-title" className="text-sm font-bold text-white font-display">
+              <h2 id="expense-form-title" className="font-display text-sm font-bold text-slate-900">
                 {editingExpense ? 'Edit expense' : 'Add expense'}
               </h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                {formStep === 'basic' ? 'Amount and title first' : 'Review and save'}
+              <p className="mt-0.5 text-[10px] text-slate-500">
+                {formStep === 'basic' ? 'Value first, then the details' : 'Review and save'}
               </p>
             </div>
             <div className="w-10" />
@@ -640,35 +744,118 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             )}
 
             {formStep === 'basic' ? (
-              <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">
-                    {isServiceFeeEnabled ? 'Subtotal before fee' : 'Amount'}
+              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+                <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
+                  <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold text-slate-600">
+                        {isServiceFeeEnabled ? 'Subtotal before fee' : 'Amount'}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        id="input-expense-amount"
+                        value={formAmount}
+                        onChange={event => {
+                          const nextValue = event.target.value;
+                          if (isMoneyInputValue(nextValue)) setFormAmount(nextValue);
+                        }}
+                        placeholder="0.00"
+                        className="w-full border-0 border-b-2 border-[#81b29a] bg-transparent px-1 py-2 font-mono text-4xl font-bold text-slate-900 placeholder-slate-300 focus:border-[#4f7f68] focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold text-slate-600">
+                        Currency
+                      </label>
+                      <select
+                        value={formCurrency}
+                        id="select-expense-currency"
+                        onChange={event => setFormCurrencyWithReason(event.target.value as Currency, 'basic-currency-select')}
+                        className="min-h-12 w-full cursor-pointer rounded-2xl border border-black/10 bg-[#f7f8f5] px-3 py-3 text-sm font-bold text-slate-800 focus:border-[#81b29a] focus:outline-none"
+                      >
+                        {SUPPORTED_CURRENCIES.map(currency => (
+                          <option key={currency} value={currency}>{currency}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {isServiceFeeEnabled && hasValidAmount && (
+                    <p className="mt-3 text-right text-[11px] font-medium text-slate-500">
+                      Total with fee <span className="font-mono font-bold text-slate-800">{amountValue.toFixed(2)} {formCurrency}</span>
+                    </p>
+                  )}
+                </section>
+
+                <section className="grid grid-cols-2 gap-2 rounded-[24px] border border-black/10 bg-white p-2.5 shadow-sm">
+                  <div className="flex min-w-0 items-center gap-2 rounded-2xl bg-[#e7f3ee] px-3 py-2.5">
+                    <MemberAvatar member={formPayerMember} size="xs" />
+                    <span className="min-w-0">
+                      <span className="block text-[10px] font-medium text-slate-500">Paid by</span>
+                      <span className="block truncate text-xs font-bold text-slate-800">
+                        {formPayer === currentMember.id ? 'You' : payerName}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="min-w-0 rounded-2xl bg-[#e8f1fa] px-3 py-2.5">
+                    <span className="block text-[10px] font-medium text-slate-500">
+                      {formSplitMethod === 'equal' ? 'Split equally' : 'Custom split'}
+                    </span>
+                    <span className="block truncate text-xs font-bold text-slate-800">{participantSummary}</span>
+                  </div>
+                </section>
+
+                <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
+                  <label className="mb-2 block text-xs font-semibold text-slate-600">
+                    What was it for?
                   </label>
                   <input
                     type="text"
-                    inputMode="decimal"
+                    id="input-expense-title"
                     required
-                    id="input-expense-amount"
-                    value={formAmount}
-                    onChange={event => {
-                      const nextValue = event.target.value;
-                      if (isMoneyInputValue(nextValue)) {
-                        setFormAmount(nextValue);
-                      }
-                    }}
-                    placeholder="0.00"
-                    className="w-full bg-[#1a1d23] border border-slate-800 rounded-2xl px-4 py-4 font-mono text-3xl font-bold text-white placeholder-slate-700 focus:border-indigo-500 focus:outline-none"
+                    value={formTitle}
+                    onChange={event => setFormTitle(event.target.value)}
+                    placeholder="Dinner, taxi, tickets"
+                    className="min-h-12 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                   />
-                </div>
+                  <div className="mt-4">
+                    <ExpenseVisualPicker
+                      title={formTitle}
+                      value={formVisualId}
+                      onChange={handleSelectExpenseVisual}
+                    />
+                  </div>
+                </section>
 
-                <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4 flex flex-col gap-3">
+                <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
+                  <label className="mb-2 block text-xs font-semibold text-slate-600">
+                    Paid by
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <MemberAvatar member={formPayerMember} size="md" />
+                    <select
+                      value={formPayer}
+                      id="select-expense-payer"
+                      onChange={event => setFormPayer(event.target.value)}
+                      className="min-h-12 min-w-0 flex-1 cursor-pointer rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-3 text-sm text-slate-900 focus:border-[#81b29a] focus:outline-none"
+                    >
+                      {approvedMembers.map(member => (
+                        <option key={member.id} value={member.id}>
+                          {member.display_name}{member.id === currentMember.id ? ' (You)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </section>
+
+                <section className="flex flex-col gap-3 rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-100">Service fee</h3>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Optional percentage added to this expense.
-                      </p>
+                      <h3 className="text-sm font-bold text-slate-900">Service fee</h3>
+                      <p className="mt-0.5 text-[11px] text-slate-500">Optional percentage added to this expense.</p>
                     </div>
                     <button
                       type="button"
@@ -683,10 +870,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           return next;
                         });
                       }}
-                      className={`min-h-10 rounded-xl px-3 text-xs font-bold cursor-pointer ${
+                      className={`min-h-10 cursor-pointer rounded-xl px-3 text-xs font-bold ${
                         isServiceFeeEnabled
                           ? 'bg-[var(--color-positive)] text-slate-950'
-                          : 'bg-[#121418] border border-slate-800 text-slate-300'
+                          : 'border border-black/10 bg-[#f7f8f5] text-slate-700'
                       }`}
                     >
                       {isServiceFeeEnabled ? 'Remove fee' : 'Add service fee'}
@@ -695,53 +882,43 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
                   {isServiceFeeEnabled && (
                     <div className="flex flex-col gap-3">
-                      <div className="grid grid-cols-[1fr_110px] gap-3">
+                      <div className="grid grid-cols-[1fr_96px] gap-3">
                         <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-2">
-                            Fee label
-                          </label>
+                          <label className="mb-2 block text-xs font-semibold text-slate-600">Fee label</label>
                           <input
                             type="text"
                             value={feeLabelInput}
                             onChange={event => setFeeLabelInput(event.target.value)}
                             placeholder="Service fee"
-                            className="w-full min-h-11 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                            className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-2">
-                            Fee %
-                          </label>
+                          <label className="mb-2 block text-xs font-semibold text-slate-600">Fee %</label>
                           <input
                             type="text"
                             inputMode="decimal"
                             value={feePercentInput}
                             onChange={event => {
                               const nextValue = event.target.value;
-                              if (isDecimalInputValue(nextValue)) {
-                                setFeePercentInput(nextValue);
-                              }
+                              if (isDecimalInputValue(nextValue)) setFeePercentInput(nextValue);
                             }}
                             placeholder="10"
-                            className="w-full min-h-11 bg-[#121418] border border-slate-800 rounded-2xl px-3 py-2.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
+                            className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-3 py-2.5 font-mono text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                           />
                         </div>
                       </div>
 
                       <div className={`rounded-2xl border px-3 py-2 text-xs ${
                         hasValidFeePercent
-                          ? 'bg-[#121418] border-slate-800 text-slate-400'
-                          : 'bg-[#e07a5f] border-[#e07a5f] text-[#3d405b] font-bold'
+                          ? 'border-black/10 bg-[#f7f8f5] text-slate-600'
+                          : 'border-[#e07a5f] bg-[#fbe7e1] font-bold text-[#8f402f]'
                       }`}>
                         {hasValidFeePercent ? (
-                          <>
-                            <p>
-                              Fee: <span className="font-mono text-slate-100">{feeAmountValue.toFixed(2)} {formCurrency}</span>
-                            </p>
-                            <p className="mt-1">
-                              Total: <span className="font-mono text-slate-100">{hasValidAmount ? amountValue.toFixed(2) : '0.00'} {formCurrency}</span>
-                            </p>
-                          </>
+                          <div className="flex items-center justify-between gap-3">
+                            <span>Fee <strong className="font-mono text-slate-900">{feeAmountValue.toFixed(2)} {formCurrency}</strong></span>
+                            <span>Total <strong className="font-mono text-slate-900">{hasValidAmount ? amountValue.toFixed(2) : '0.00'} {formCurrency}</strong></span>
+                          </div>
                         ) : (
                           <p>Service fee must be between 0 and 100 percent.</p>
                         )}
@@ -749,72 +926,33 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     </div>
                   )}
                 </section>
-
-                <div className="grid grid-cols-[1fr_120px] gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-2">
-                      What was it for?
-                    </label>
-                    <input
-                      type="text"
-                      id="input-expense-title"
-                      required
-                      value={formTitle}
-                      onChange={event => setFormTitle(event.target.value)}
-                      placeholder="Dinner, taxi, tickets"
-                      className="w-full min-h-12 bg-[#1a1d23] border border-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-2">
-                      Currency
-                    </label>
-                    <select
-                      value={formCurrency}
-                      id="select-expense-currency"
-                      onChange={event => setFormCurrencyWithReason(event.target.value as Currency, 'basic-currency-select')}
-                      className="w-full min-h-12 bg-[#1a1d23] border border-slate-800 rounded-2xl px-3 py-3 text-sm font-bold text-slate-100 focus:border-indigo-500 focus:outline-none cursor-pointer"
-                    >
-                      {SUPPORTED_CURRENCIES.map(currency => (
-                        <option key={currency} value={currency}>
-                          {currency}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">
-                    Paid by
-                  </label>
-                  <select
-                    value={formPayer}
-                    id="select-expense-payer"
-                    onChange={event => setFormPayer(event.target.value)}
-                    className="w-full min-h-12 bg-[#1a1d23] border border-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none cursor-pointer"
-                  >
-                    {approvedMembers.map(member => (
-                      <option key={member.id} value={member.id}>
-                        {member.display_name}{member.id === currentMember.id ? ' (You)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
             ) : (
               <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
                 <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4">
                   <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
-                        Preview
-                      </p>
-                      <h3 className="text-lg font-bold text-white truncate mt-1">{formTitle}</h3>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Paid by <span className="font-semibold text-slate-200">{payerName}</span>
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <ExpenseIcon title={formTitle} visualId={formVisualId} size="lg" />
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
+                          Preview
+                        </p>
+                        <h3 className="text-lg font-bold text-white truncate mt-1">{formTitle}</h3>
+                        <span
+                          className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold"
+                          style={{
+                            backgroundColor: formVisualCategory.palette.surface,
+                            borderColor: formVisualCategory.palette.border,
+                            color: formVisualCategory.palette.foreground,
+                          }}
+                        >
+                          {formVisualCategory.label}
+                        </span>
+                        <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
+                          <MemberAvatar member={formPayerMember} size="xs" />
+                          Paid by <span className="font-semibold text-slate-200">{payerName}</span>
+                        </p>
+                      </div>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="font-mono text-lg font-bold text-white">
@@ -832,7 +970,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           </p>
                           {hasValidRate && (
                             <p className="text-[10px] text-slate-500 font-mono mt-1">
-                              {useCustomExchangeRate ? 'Custom' : 'Trip'} rate {rateValue.toString()}
+                              {useCustomExchangeRate ? 'Custom' : 'Group'} rate {rateValue.toString()}
                             </p>
                           )}
                         </>
@@ -922,14 +1060,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           equalPreviewSplits.map(item => {
                             const member = approvedMembers.find(m => m.id === item.member_id);
                             return (
-                              <div key={item.member_id} className="flex items-center justify-between text-xs text-slate-400">
-                                <span>
-                                  {member?.display_name ?? 'Participant'}
-                                  {isServiceFeeEnabled && (
-                                    <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
-                                      {item.subtotal_amount_owed?.toFixed(2) ?? '--'} + {item.fee_amount_owed?.toFixed(2) ?? '--'}
-                                    </span>
-                                  )}
+                              <div key={item.member_id} className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <MemberAvatar member={member} size="xs" />
+                                  <span className="min-w-0 truncate">
+                                    {member?.display_name ?? 'Participant'}
+                                    {isServiceFeeEnabled && (
+                                      <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                                        {item.subtotal_amount_owed?.toFixed(2) ?? '--'} + {item.fee_amount_owed?.toFixed(2) ?? '--'}
+                                      </span>
+                                    )}
+                                  </span>
                                 </span>
                                 <span className="font-mono font-bold text-slate-100">
                                   {item.amount_owed.toFixed(2)} {tripBaseCurrency}
@@ -945,17 +1086,20 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           const member = approvedMembers.find(m => m.id === participantId);
                           const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
                           return (
-                            <div key={participantId} className="flex items-center justify-between text-xs text-slate-400">
-                              <span>
-                                {member?.display_name ?? 'Participant'}
-                                <span className="ml-1 text-[9px] uppercase">
-                                  {splitRow?.mode ?? 'auto'}
-                                </span>
-                                {isServiceFeeEnabled && splitRow && (
-                                  <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
-                                    {splitRow.subtotal_amount_owed?.toFixed(2) ?? '--'} + {splitRow.fee_amount_owed?.toFixed(2) ?? '--'}
+                            <div key={participantId} className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <MemberAvatar member={member} size="xs" />
+                                <span className="min-w-0 truncate">
+                                  {member?.display_name ?? 'Participant'}
+                                  <span className="ml-1 text-[9px] uppercase">
+                                    {splitRow?.mode ?? 'auto'}
                                   </span>
-                                )}
+                                  {isServiceFeeEnabled && splitRow && (
+                                    <span className="block text-[10px] text-slate-500 font-mono mt-0.5">
+                                      {splitRow.subtotal_amount_owed?.toFixed(2) ?? '--'} + {splitRow.fee_amount_owed?.toFixed(2) ?? '--'}
+                                    </span>
+                                  )}
+                                </span>
                               </span>
                               <span className="font-mono font-bold text-slate-100">
                                 {splitRow ? splitRow.amount_owed.toFixed(2) : '--'} {tripBaseCurrency}
@@ -973,7 +1117,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     {!useCustomExchangeRate && tripExchangeRate && (
                       <div>
                         <p className="text-xs text-slate-300">
-                          Using trip rate:
+                          Using group rate:
                         </p>
                         <p className="font-mono text-sm text-indigo-300 mt-1">
                           1 {formCurrency} = {tripExchangeRate.toString()} {tripBaseCurrency}
@@ -994,7 +1138,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     {!useCustomExchangeRate && !tripExchangeRate && (
                       <div>
                         <p className="text-xs text-amber-200 leading-relaxed">
-                          No trip exchange rate set for {formCurrency} -&gt; {tripBaseCurrency}. Ask admin to set it or enter a custom rate.
+                          No group exchange rate set for {formCurrency} -&gt; {tripBaseCurrency}. Ask admin to set it or enter a custom rate.
                         </p>
                         <button
                           type="button"
@@ -1041,7 +1185,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             }}
                             className="mt-3 text-[11px] font-bold text-indigo-300 cursor-pointer"
                           >
-                            Use trip rate
+                            Use group rate
                           </button>
                         )}
                       </div>
@@ -1127,6 +1271,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             }`}>
                               {isChecked && <Check className="w-3.5 h-3.5 text-white" />}
                             </span>
+                            <MemberAvatar member={member} size="xs" />
                             <span className="text-sm font-semibold truncate">{member.display_name}</span>
                           </button>
                         );
@@ -1164,8 +1309,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         {equalPreviewSplits.map(item => {
                           const member = approvedMembers.find(m => m.id === item.member_id);
                           return (
-                            <div key={item.member_id} className="flex items-center justify-between text-xs text-slate-400">
-                              <span>{member?.display_name ?? 'Participant'}</span>
+                            <div key={item.member_id} className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                              <span className="flex min-w-0 items-center gap-2 truncate">
+                                <MemberAvatar member={member} size="xs" />
+                                <span className="truncate">{member?.display_name ?? 'Participant'}</span>
+                              </span>
                               <span className="font-mono font-bold text-slate-100">
                                 {item.amount_owed.toFixed(2)} {tripBaseCurrency}
                               </span>
@@ -1251,30 +1399,33 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             );
                             return (
                               <label key={participantId} className="flex items-center justify-between gap-3 rounded-2xl bg-[#121418] border border-slate-800 px-3 py-2">
-                                <span className="min-w-0">
-                                  <span className="text-sm font-semibold text-slate-200 truncate block">
-                                    {member?.display_name ?? 'Participant'}
+                                <span className="flex min-w-0 items-center gap-2.5">
+                                  <MemberAvatar member={member} size="xs" />
+                                  <span className="min-w-0">
+                                    <span className="text-sm font-semibold text-slate-200 truncate block">
+                                      {member?.display_name ?? 'Participant'}
+                                    </span>
+                                    <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
+                                      isManual ? 'text-indigo-300' : 'text-slate-500'
+                                    }`}>
+                                      {isManual ? 'Manual' : 'Auto'}
+                                    </span>
+                                    {!isManual && (
+                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                        Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
+                                      </span>
+                                    )}
+                                    {isServiceFeeEnabled && (
+                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                        +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
+                                      </span>
+                                    )}
+                                    {displaySplitEquivalent.converted && (
+                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                        {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
+                                      </span>
+                                    )}
                                   </span>
-                                  <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
-                                    isManual ? 'text-indigo-300' : 'text-slate-500'
-                                  }`}>
-                                    {isManual ? 'Manual' : 'Auto'}
-                                  </span>
-                                  {!isManual && (
-                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                      Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
-                                    </span>
-                                  )}
-                                  {isServiceFeeEnabled && (
-                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                      +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
-                                    </span>
-                                  )}
-                                  {displaySplitEquivalent.converted && (
-                                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                      {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
-                                    </span>
-                                  )}
                                 </span>
                                 <span className="flex items-center gap-2 shrink-0">
                                   <input
@@ -1357,20 +1508,23 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             )}
           </div>
 
-          <div className="shrink-0 border-t border-slate-800 bg-[#121418] p-4 md:px-6 lg:px-8 flex justify-center gap-3">
+          <div
+            className="flex shrink-0 justify-center gap-3 border-t border-black/10 bg-white p-4 md:px-6 lg:px-8"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+          >
             {formStep === 'basic' ? (
               <>
                 <button
                   type="button"
                   onClick={closeForm}
-                  className="min-h-12 flex-1 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-300 font-bold text-sm cursor-pointer"
+                  className="min-h-12 flex-1 cursor-pointer rounded-2xl border border-black/10 bg-[#f7f8f5] text-sm font-bold text-slate-700"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleContinueToPreview}
-                  className="min-h-12 flex-[1.4] rounded-2xl bg-indigo-600 text-slate-950 font-bold text-sm cursor-pointer accent-glow"
+                  className="min-h-12 flex-[1.4] cursor-pointer rounded-2xl bg-[#81b29a] text-sm font-bold text-[#16372b] shadow-sm"
                 >
                   Continue
                 </button>
@@ -1402,15 +1556,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         </form>
       ) : (
         <>
-          <div className="px-4 pt-4 md:px-6 lg:px-8 flex flex-col gap-3 shrink-0">
-            <div className="flex items-center justify-between gap-3">
+          <div className="shrink-0 px-4 pb-3 pt-4 md:px-6 lg:px-8">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <h1 className="text-xl font-bold font-display text-white tracking-tight">
-                  Expenses
-                </h1>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {trip.name} - Base {tripBaseCurrency}
-                </p>
+                <h1 className="font-display text-xl font-bold tracking-tight text-slate-900">Expenses</h1>
+                <p className="mt-0.5 text-xs text-slate-500">{trip.name} · Base {tripBaseCurrency}</p>
               </div>
 
               {!isReadOnly && (
@@ -1418,153 +1568,212 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   type="button"
                   id="btn-add-expense-tab"
                   onClick={handleOpenAddForm}
-                  className="w-12 h-12 bg-indigo-600 active:scale-95 text-slate-950 rounded-full shadow-lg transition-all flex items-center justify-center cursor-pointer accent-glow"
-                  title="Add Expense"
+                  className="flex h-12 w-12 cursor-pointer items-center justify-center rounded-full bg-[#4fa889] text-white shadow-[0_8px_22px_rgba(79,168,137,0.3)] transition active:scale-95"
+                  title="Add expense"
+                  aria-label="Add expense"
                 >
-                  <Plus className="w-5 h-5 stroke-[2.5]" />
+                  <Plus className="h-6 w-6 stroke-[2.5]" />
                 </button>
               )}
             </div>
 
             {isReadOnly && (
-              <div className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-4 py-3 text-xs text-[#3d405b] font-semibold leading-relaxed shadow-sm">
+              <div className="mb-3 rounded-2xl border border-[#e07a5f] bg-[#fbe7e1] px-4 py-3 text-xs font-semibold leading-relaxed text-[#8f402f] shadow-sm">
                 {readOnlyMessage}
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl bg-[#1a1d23] border border-slate-800/80 p-4">
-                <div className="flex items-center gap-2 text-slate-400 text-xs font-medium mb-3">
-                  <span className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-300 flex items-center justify-center">
-                    <Wallet className="w-4 h-4" />
-                  </span>
-                  <span>Your balance</span>
+            <section className="rounded-[28px] border border-[#c7e4d8] bg-[#dff3eb] p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#527568]">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/75 text-[#36765e]">
+                      <Wallet className="h-4 w-4" />
+                    </span>
+                    Your balance
+                  </div>
+                  <p
+                    id="user-net-balance"
+                    className={`font-display text-3xl font-bold leading-none ${
+                      currentUserBalance && currentUserBalance.net_balance > 0.01
+                        ? 'text-[#28745a]'
+                        : currentUserBalance && currentUserBalance.net_balance < -0.01
+                          ? 'text-[#bd5b43]'
+                          : 'text-slate-700'
+                    }`}
+                  >
+                    {currentUserBalance && currentUserBalance.net_balance > 0 ? '+' : ''}
+                    {userBalanceDisplay.primary}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold text-[#527568]">{balanceLabel}</p>
+                  {userBalanceDisplay.secondary && (
+                    <p className="mt-1 font-mono text-[10px] text-[#63867a]">{userBalanceDisplay.secondary}</p>
+                  )}
+                  {userBalanceDisplay.helper && (
+                    <p className="mt-1 text-[10px] text-[#63867a]">{userBalanceDisplay.helper}</p>
+                  )}
                 </div>
-                <p
-                  id="user-net-balance"
-                  className={`text-xl font-bold font-display leading-none ${
-                    currentUserBalance && currentUserBalance.net_balance > 0.01
-                      ? 'text-emerald-400'
-                      : currentUserBalance && currentUserBalance.net_balance < -0.01
-                        ? 'text-rose-300'
-                        : 'text-slate-300'
-                  }`}
-                >
-                  {currentUserBalance && currentUserBalance.net_balance > 0 ? '+' : ''}
-                  {userBalanceDisplay.primary}
-                </p>
-                {userBalanceDisplay.secondary && (
-                  <p className="text-[10px] text-slate-500 mt-1 font-mono">{userBalanceDisplay.secondary}</p>
-                )}
-                {userBalanceDisplay.helper && (
-                  <p className="text-[10px] text-slate-500 mt-1">{userBalanceDisplay.helper}</p>
-                )}
-                <p className="text-[11px] text-slate-500 mt-2">{balanceLabel}</p>
-              </div>
 
-              <div className="rounded-2xl bg-[#1a1d23] border border-slate-800/80 p-4">
-                <div className="flex items-center gap-2 text-slate-400 text-xs font-medium mb-3">
-                  <span className="w-8 h-8 rounded-xl bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
-                    <Receipt className="w-4 h-4" />
-                  </span>
-                  <span>Total spent</span>
+                <div className="min-w-[128px] rounded-2xl border border-[#c8dff2] bg-[#e7f2fc] p-3 text-right">
+                  <div className="flex items-center justify-end gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#557792]">
+                    <Receipt className="h-3.5 w-3.5" />
+                    Total spent
+                  </div>
+                  <p className="mt-2 font-mono text-base font-bold text-slate-800">{totalSpendingDisplay.primary}</p>
+                  {totalSpendingDisplay.secondary && (
+                    <p className="mt-1 font-mono text-[9px] text-slate-500">{totalSpendingDisplay.secondary}</p>
+                  )}
+                  <p className="mt-1 text-[10px] text-slate-500">{expenses.length} expenses</p>
                 </div>
-                <p className="text-xl font-bold font-display text-white leading-none">
-                  {totalSpendingDisplay.primary}
-                </p>
-                {totalSpendingDisplay.secondary && (
-                  <p className="text-[10px] text-slate-500 mt-1 font-mono">{totalSpendingDisplay.secondary}</p>
-                )}
-                {totalSpendingDisplay.helper && (
-                  <p className="text-[10px] text-slate-500 mt-1">{totalSpendingDisplay.helper}</p>
-                )}
-                <p className="text-[11px] text-slate-500 mt-2">{expenses.length} expenses</p>
               </div>
-            </div>
-
-            <div className="relative">
-              <input
-                type="text"
-                id="expense-search"
-                value={searchQuery}
-                onChange={event => setSearchQuery(event.target.value)}
-                placeholder="Search expenses..."
-                className="w-full bg-[#1a1d23] border border-slate-800/90 rounded-2xl pl-10 pr-4 py-3 text-sm focus:border-indigo-500 focus:outline-none text-slate-200 placeholder-slate-500"
-              />
-              <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500" />
-            </div>
+            </section>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 mt-3 no-scrollbar">
-            {filteredExpenses.length === 0 ? (
-              <div className="text-center py-14 px-4 border border-dashed border-slate-800 rounded-3xl bg-[#1a1d23]">
-                <Search className="w-9 h-9 text-slate-700 mx-auto mb-3" />
-                <p className="text-sm text-slate-300 font-semibold">
-                  {searchQuery ? 'No expenses found' : isReadOnly ? 'No expenses in this read-only trip' : 'No expenses yet'}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  {searchQuery
-                    ? 'Try a different search.'
-                    : isReadOnly
-                      ? 'This trip is read-only, but historical expenses will appear here.'
-                      : 'Tap the plus button to add the first shared cost.'}
-                </p>
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[28px] border-x border-t border-black/10 bg-white shadow-[0_-8px_28px_rgba(31,41,55,0.05)]">
+            <div className="flex shrink-0 gap-2 border-b border-black/10 bg-white px-4 py-3 md:px-6 lg:px-8">
+              <div className="relative min-w-0 flex-1">
+                <input
+                  type="text"
+                  id="expense-search"
+                  value={searchQuery}
+                  onChange={event => setSearchQuery(event.target.value)}
+                  placeholder="Search title, category or payer"
+                  className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] py-3 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
+                />
+                <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
               </div>
-            ) : (
-              <div className="grid gap-2 pb-16 md:grid-cols-2 md:pb-8 xl:grid-cols-3">
-                {filteredExpenses.map(expense => {
-                  const paidBy = approvedMembers.find(m => m.id === expense.paid_by_member_id);
-                  const displayEquivalent = formatDisplayMoney(
-                    expense.converted_amount,
-                    tripBaseCurrency,
-                    displayCurrency,
-                    safeExchangeRates,
-                    trip.id
-                  );
-                  const showDisplayEquivalent = displayEquivalent.converted && displayEquivalent.currency !== expense.currency;
-                  return (
-                    <button
-                      type="button"
-                      key={expense.id}
-                      id={`expense-card-${expense.id}`}
-                      onClick={() => onSetSelectedExpenseId(expense.id)}
-                      className="w-full bg-[#1a1d23] border border-slate-800/75 hover:border-slate-700 hover:bg-[#20242b] rounded-2xl p-4 transition-all cursor-pointer flex justify-between items-center gap-3 text-left"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="text-sm font-bold text-slate-100 truncate block">
-                          {expense.title}
-                        </span>
-                        <span className="text-[11px] text-slate-500 mt-1 block truncate">
-                          Paid by {paidBy ? (paidBy.id === currentMember.id ? 'You' : paidBy.display_name) : 'Removed member'} - {expense.expense_date}
-                        </span>
-                        {(expense.fee_percent ?? 0) > 0 && (
-                          <span className="text-[10px] text-slate-500 mt-1 block truncate">
-                            Includes {expense.fee_percent?.toString()}% {expense.fee_label || 'service fee'}
-                          </span>
-                        )}
-                      </span>
+              <button
+                type="button"
+                onClick={() => setExpenseListFilter(current => current === 'all' ? 'mine' : 'all')}
+                aria-pressed={expenseListFilter === 'mine'}
+                className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-2xl border px-3 text-xs font-bold transition active:scale-95 ${
+                  expenseListFilter === 'mine'
+                    ? 'border-[#81b29a] bg-[#e2f2eb] text-[#356c58]'
+                    : 'border-black/10 bg-[#f7f8f5] text-slate-600'
+                }`}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                {expenseListFilter === 'mine' ? 'Mine' : 'All'}
+              </button>
+            </div>
 
-                      <span className="text-right shrink-0">
-                        <span className="font-mono text-sm font-bold text-slate-100 block">
-                          {expense.amount.toFixed(2)} {expense.currency}
-                        </span>
-                        {expense.currency !== tripBaseCurrency && (
-                          <span className="text-[10px] text-slate-500 font-mono block mt-1">
-                            {Number.isFinite(expense.converted_amount) ? expense.converted_amount.toFixed(2) : '--'} {tripBaseCurrency}
-                          </span>
-                        )}
-                        {showDisplayEquivalent && (
-                          <span className="text-[10px] text-slate-500 font-mono block mt-1">
-                            {displayEquivalent.primary}
-                          </span>
-                        )}
+            <div className="no-scrollbar flex-1 overflow-y-auto pb-16 md:pb-8">
+              {filteredExpenses.length === 0 ? (
+                <div className="m-4 rounded-3xl border border-dashed border-black/10 bg-[#fafbf9] px-4 py-12 text-center">
+                  <Search className="mx-auto mb-3 h-9 w-9 text-slate-300" />
+                  <p className="text-sm font-semibold text-slate-700">
+                    {searchQuery || expenseListFilter === 'mine'
+                      ? 'No matching expenses'
+                      : isReadOnly
+                        ? 'No expenses in this read-only group'
+                        : 'No expenses yet'}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {searchQuery || expenseListFilter === 'mine'
+                      ? 'Try another search or show all expenses.'
+                      : isReadOnly
+                        ? 'Historical expenses will appear here.'
+                        : 'Tap the plus button to add the first shared cost.'}
+                  </p>
+                </div>
+              ) : (
+                groupedExpenses.map(group => (
+                  <section key={group.dateKey} aria-labelledby={`expense-group-${group.dateKey}`}>
+                    <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-black/5 bg-[#fafbf9]/95 px-4 py-2.5 backdrop-blur md:px-6 lg:px-8">
+                      <h2 id={`expense-group-${group.dateKey}`} className="text-xs font-bold text-slate-700">
+                        {group.label}
+                      </h2>
+                      <span className="text-[10px] font-medium text-slate-400">
+                        {group.expenses.length} {group.expenses.length === 1 ? 'expense' : 'expenses'}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    </div>
+
+                    <div className="divide-y divide-black/5">
+                      {group.expenses.map(expense => {
+                        const paidBy = approvedMembers.find(member => member.id === expense.paid_by_member_id);
+                        const currentMemberSplit = splits.find(split =>
+                          split.expense_id === expense.id && split.member_id === currentMember.id
+                        );
+                        const currentMemberShare = currentMemberSplit?.amount_owed ?? 0;
+                        const currentMemberPaid = expense.paid_by_member_id === currentMember.id
+                          ? expense.converted_amount
+                          : 0;
+                        const currentMemberNet = currentMemberPaid - currentMemberShare;
+                        const positionAmount = Math.abs(currentMemberNet) > 0.01
+                          ? Math.abs(currentMemberNet)
+                          : currentMemberShare;
+                        const positionDisplay = formatDisplayMoney(
+                          positionAmount,
+                          tripBaseCurrency,
+                          displayCurrency,
+                          safeExchangeRates,
+                          trip.id,
+                        );
+                        const positionLabel = currentMemberNet > 0.01
+                          ? 'you lent'
+                          : currentMemberNet < -0.01
+                            ? 'you borrowed'
+                            : currentMemberShare > 0.01
+                              ? 'your share'
+                              : 'not in split';
+                        const positionTone = currentMemberNet > 0.01
+                          ? 'text-[#328267]'
+                          : currentMemberNet < -0.01
+                            ? 'text-[#c45f45]'
+                            : 'text-slate-500';
+
+                        return (
+                          <button
+                            type="button"
+                            key={expense.id}
+                            id={`expense-card-${expense.id}`}
+                            onClick={() => onSetSelectedExpenseId(expense.id)}
+                            className="flex w-full cursor-pointer items-center gap-3 bg-white px-4 py-3 text-left transition hover:bg-[#fafbf9] active:bg-[#f4f7f4] md:px-6 lg:px-8"
+                          >
+                            <ExpenseIcon
+                              title={expense.title}
+                              visualId={readExpenseVisualPreference(trip.id, expense.title)}
+                              size="md"
+                            />
+
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-bold text-slate-900">{expense.title}</span>
+                              <span className="mt-1 block truncate text-[11px] text-slate-500">
+                                {paidBy
+                                  ? paidBy.id === currentMember.id ? 'You paid' : `${paidBy.display_name} paid`
+                                  : 'Removed member paid'}
+                                {' · '}
+                                {new Date(`${expense.expense_date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                              </span>
+                              {(expense.fee_percent ?? 0) > 0 && (
+                                <span className="mt-0.5 block truncate text-[9px] text-slate-400">
+                                  Includes {expense.fee_percent}% {expense.fee_label || 'service fee'}
+                                </span>
+                              )}
+                            </span>
+
+                            <span className="min-w-[104px] shrink-0 text-right">
+                              <span className="block font-mono text-sm font-bold text-slate-900">
+                                {expense.amount.toFixed(2)} {expense.currency}
+                              </span>
+                              <span className={`mt-1 block text-[9px] font-bold ${positionTone}`}>
+                                {positionLabel}
+                              </span>
+                              {positionLabel !== 'not in split' && (
+                                <span className={`block font-mono text-[11px] font-bold ${positionTone}`}>
+                                  {positionDisplay.primary}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))
+              )}
+            </div>
+          </section>
         </>
       )}
 
@@ -1584,13 +1793,32 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             </div>
 
             <div className="px-5 py-4 overflow-y-auto flex-1 flex flex-col gap-4 no-scrollbar">
-              <div>
-                <h4 id="detail-expense-title" className="text-lg font-bold text-white leading-snug">
-                  {detailExpense.title}
-                </h4>
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1">
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>{detailExpense.expense_date}</span>
+              <div className="flex items-center gap-3">
+                <ExpenseIcon
+                  title={detailExpense.title}
+                  visualId={readExpenseVisualPreference(trip.id, detailExpense.title)}
+                  size="lg"
+                />
+                <div className="min-w-0">
+                  <h4 id="detail-expense-title" className="truncate text-lg font-bold leading-snug text-white">
+                    {detailExpense.title}
+                  </h4>
+                  {detailVisual && detailVisualCategory && (
+                    <span
+                      className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold"
+                      style={{
+                        backgroundColor: detailVisualCategory.palette.surface,
+                        borderColor: detailVisualCategory.palette.border,
+                        color: detailVisualCategory.palette.foreground,
+                      }}
+                    >
+                      {detailVisual.label} · {detailVisualCategory.label}
+                    </span>
+                  )}
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <Calendar className="h-3.5 w-3.5" />
+                    <span>{detailExpense.expense_date}</span>
+                  </div>
                 </div>
               </div>
 
@@ -1651,9 +1879,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   Paid by
                 </p>
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center font-bold text-xs uppercase">
-                    {detailPayer ? detailPayer.display_name.charAt(0) : 'R'}
-                  </div>
+                  <MemberAvatar member={detailPayer} size="sm" />
                   <p className="text-sm font-semibold text-slate-200">
                     {detailPayer ? (detailPayer.id === currentMember.id ? 'You' : detailPayer.display_name) : 'Removed member'}
                   </p>
@@ -1668,9 +1894,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   {detailSplits.map(split => {
                     const participant = approvedMembers.find(m => m.id === split.member_id);
                     return (
-                      <div key={split.id} className="flex justify-between items-center text-xs">
-                        <span className="text-slate-400 truncate">
-                          {participant ? (participant.id === currentMember.id ? 'You' : participant.display_name) : 'Removed member'}
+                      <div key={split.id} className="flex justify-between items-center gap-3 text-xs">
+                        <span className="flex min-w-0 items-center gap-2 text-slate-400">
+                          <MemberAvatar member={participant} size="xs" />
+                          <span className="truncate">
+                            {participant ? (participant.id === currentMember.id ? 'You' : participant.display_name) : 'Removed member'}
+                          </span>
                         </span>
                         <span className="font-mono font-bold text-slate-100">
                           {Number.isFinite(split.amount_owed) ? split.amount_owed.toFixed(2) : '--'} {tripBaseCurrency}

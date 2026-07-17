@@ -1,6 +1,6 @@
 import React from 'react';
-import { Menu } from 'lucide-react';
 import { Member, Trip } from '../types';
+import { MemberAvatar } from './MemberAvatar';
 
 interface AppHeaderProps {
   trip: Trip;
@@ -21,27 +21,27 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       : currentMember?.status ?? trip.base_currency;
 
   return (
-    <header className="app-header-safe sticky top-0 z-40 shrink-0 bg-[#121418]/95 backdrop-blur border-b border-slate-800/70 px-4 pb-3 flex items-center justify-between gap-3">
+    <header className="app-header-safe header-wash sticky top-0 z-40 flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 pb-3.5 shadow-[0_8px_24px_rgba(40,73,60,0.05)]">
       <button
         type="button"
         id="btn-open-side-menu"
         onClick={onMenuOpen}
-        className="w-11 h-11 rounded-2xl bg-[#1a1d23] border border-slate-800 text-slate-200 flex items-center justify-center active:scale-95 transition-all cursor-pointer"
-        aria-label="Open menu"
+        className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-2xl bg-white/45 text-[var(--color-text)] transition-all hover:bg-white/70 active:scale-95"
+        aria-label={currentMember ? `Open menu for ${currentMember.display_name}` : 'Open menu'}
       >
-        <Menu className="w-5 h-5" />
+        <MemberAvatar member={currentMember} size="md" />
       </button>
 
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-mono uppercase tracking-wider text-slate-500 leading-none">
-          Parité
+        <p className="text-[10px] font-bold uppercase leading-none tracking-[0.16em] text-[var(--color-positive)]">
+          Parité group
         </p>
-        <h1 className="text-base font-bold text-white font-display truncate leading-tight mt-1">
+        <h1 className="mt-1 truncate font-display text-[17px] font-bold leading-tight text-[var(--color-text)]">
           {trip.name}
         </h1>
       </div>
 
-      <div className="shrink-0 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1.5 text-[10px] font-bold text-indigo-300 uppercase font-mono">
+      <div className="currency-tag shrink-0 rounded-full px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-wide text-[var(--color-positive)]">
         {statusLabel}
       </div>
     </header>
