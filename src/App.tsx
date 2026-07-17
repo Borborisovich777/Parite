@@ -91,7 +91,10 @@ function PariteApp() {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [accountAccess, setAccountAccess] = useState<AccountAccess | null>(null);
+  const [accountApprovalMode, setAccountApprovalMode] = useState<'unknown' | 'enforced' | 'legacy'>('unknown');
+  const [verifiedAccountUserId, setVerifiedAccountUserId] = useState<string | null>(null);
   const [pendingAccountAccess, setPendingAccountAccess] = useState<AccountAccess[]>([]);
+  const [accountRequestError, setAccountRequestError] = useState<string | null>(null);
   const [isAccountAccessLoading, setIsAccountAccessLoading] = useState(false);
   const [busyAccountAction, setBusyAccountAction] = useState<{ userId: string; decision: 'approve' | 'reject' } | null>(null);
   const [isMemberDataRefreshing, setIsMemberDataRefreshing] = useState(false);
@@ -151,7 +154,9 @@ function PariteApp() {
     ? tripMembers.find(member => member.id === selectedBreakdownMemberId) ?? null
     : null;
   const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
-  const isApprovedAccount = accountAccess?.status === 'approved';
+  const isApprovedAccount = authUserId !== null
+    && verifiedAccountUserId === authUserId
+    && (accountApprovalMode === 'legacy' || accountAccess?.status === 'approved');
   authUserIdRef.current = authUserId;
   accountRoleRef.current = accountAccess?.role ?? null;
   const memberManagementRequestCount = (currentMember?.role === 'admin'
@@ -340,38 +345,75 @@ function PariteApp() {
   const refreshPendingAccountAccess = useCallback(async () => {
     const requests = await listPendingAccountAccess();
     setPendingAccountAccess(requests);
+    setAccountRequestError(null);
   }, []);
 
   useEffect(() => {
     if (!authUserId || isBootstrapping) {
       setAccountAccess(null);
+      setAccountApprovalMode('unknown');
+      setVerifiedAccountUserId(null);
       setPendingAccountAccess([]);
+      setAccountRequestError(null);
       setIsAccountAccessLoading(false);
       return;
     }
 
     let cancelled = false;
+    setAccountAccess(null);
+    setAccountApprovalMode('unknown');
+    setVerifiedAccountUserId(null);
+    setPendingAccountAccess([]);
+    setAccountRequestError(null);
 
     async function loadAccountAccess() {
       setIsAccountAccessLoading(true);
       try {
-        const access = await getMyAccountAccess();
+        const lookup = await getMyAccountAccess();
         if (cancelled) return;
+
+        if (lookup.mode === 'legacy') {
+          setAccountApprovalMode('legacy');
+          setVerifiedAccountUserId(authUserId);
+          setAccountAccess(null);
+          setPendingAccountAccess([]);
+          setAccountRequestError(null);
+          setAppError(null);
+          return;
+        }
+
+        const access = lookup.access;
+        setAccountApprovalMode('enforced');
+        setVerifiedAccountUserId(authUserId);
         setAccountAccess(access);
         setAppError(null);
 
         if (access.role === 'admin' && access.status === 'approved') {
-          const requests = await listPendingAccountAccess();
-          if (!cancelled) setPendingAccountAccess(requests);
+          try {
+            const requests = await listPendingAccountAccess();
+            if (!cancelled) {
+              setPendingAccountAccess(requests);
+              setAccountRequestError(null);
+            }
+          } catch (error) {
+            console.error(error);
+            if (!cancelled) {
+              setAccountRequestError(getActionErrorMessage(error, 'Could not load account approval requests.'));
+            }
+          }
         } else {
           setPendingAccountAccess([]);
+          setAccountRequestError(null);
         }
       } catch (error) {
         console.error(error);
         if (!cancelled) {
           setAccountAccess(null);
+          setAccountApprovalMode('unknown');
+          setVerifiedAccountUserId(null);
           setPendingAccountAccess([]);
-          setAppError(error instanceof Error ? error.message : 'Could not verify account approval.');
+          setAccountRequestError(null);
+          setAppError(getActionErrorMessage(error, 'Could not verify account approval.'));
         }
       } finally {
         if (!cancelled) setIsAccountAccessLoading(false);
@@ -463,7 +505,10 @@ function PariteApp() {
       await signOut();
       setAuthUser(null);
       setAccountAccess(null);
+      setAccountApprovalMode('unknown');
+      setVerifiedAccountUserId(null);
       setPendingAccountAccess([]);
+      setAccountRequestError(null);
       setWorkspace(null);
       setWorkspaces([]);
       setIsSideMenuOpen(false);
@@ -552,9 +597,12 @@ function PariteApp() {
           && accountRequestResult.value
         ) {
           setPendingAccountAccess(accountRequestResult.value);
+          setAccountRequestError(null);
         }
       } else {
-        refreshError ??= accountRequestResult.reason;
+        setAccountRequestError(
+          getActionErrorMessage(accountRequestResult.reason, 'Could not refresh account approval requests.')
+        );
       }
 
       if (refreshError) throw refreshError;
@@ -626,11 +674,22 @@ function PariteApp() {
     setIsAccountAccessLoading(true);
     setAppError(null);
     try {
-      const access = await getMyAccountAccess();
-      setAccountAccess(access);
+      const lookup = await getMyAccountAccess();
+      setAccountApprovalMode(lookup.mode);
+      setVerifiedAccountUserId(authUserId);
+      setAccountAccess(lookup.access);
+      if (lookup.mode === 'legacy') {
+        setPendingAccountAccess([]);
+        setAccountRequestError(null);
+      }
     } catch (error) {
       console.error(error);
-      setAppError(error instanceof Error ? error.message : 'Could not verify account approval.');
+      setAccountApprovalMode('unknown');
+      setVerifiedAccountUserId(null);
+      setAccountAccess(null);
+      setPendingAccountAccess([]);
+      setAccountRequestError(null);
+      setAppError(getActionErrorMessage(error, 'Could not verify account approval.'));
     } finally {
       setIsAccountAccessLoading(false);
     }
@@ -1379,13 +1438,23 @@ function PariteApp() {
               {appError ?? 'Ask an administrator to check your account approval record.'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="min-h-11 rounded-xl border border-slate-700 px-5 text-xs font-bold text-slate-200 cursor-pointer"
-          >
-            Log out
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={handleCheckAccountApproval}
+              disabled={isAccountAccessLoading}
+              className="min-h-11 rounded-xl bg-indigo-600 px-5 text-xs font-bold text-slate-950 cursor-pointer disabled:opacity-60"
+            >
+              {isAccountAccessLoading ? 'Checking...' : 'Try again'}
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="min-h-11 rounded-xl border border-slate-700 px-5 text-xs font-bold text-slate-200 cursor-pointer"
+            >
+              Log out
+            </button>
+          </div>
         </div>
       );
     }
@@ -1986,6 +2055,7 @@ function PariteApp() {
                     currentMember={currentMember}
                     members={tripMembers}
                     accountRequests={accountAccess?.role === 'admin' ? pendingAccountAccess : []}
+                    accountRequestsError={accountAccess?.role === 'admin' ? accountRequestError : null}
                     isPlatformAdmin={accountAccess?.role === 'admin'}
                     busyAccountUserId={busyAccountAction?.userId ?? null}
                     busyAccountDecision={busyAccountAction?.decision ?? null}
