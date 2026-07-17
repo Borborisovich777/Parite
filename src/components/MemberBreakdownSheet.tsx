@@ -161,12 +161,6 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
     : 'This member has no shared expense splits yet.';
   const chartEmptyText = 'No spending data yet.';
 
-  const handleChartModeChange = (nextMode: ChartMode) => {
-    setChartMode(nextMode);
-    setExpenseListMode(nextMode === 'paid' ? 'paid' : 'shared');
-    setSelectedCategoryId(null);
-  };
-
   const handleCategorySelection = (sliceId: string | null) => {
     setSelectedCategoryId(sliceId as ExpenseVisualCategoryId | null);
     setExpenseListMode(chartMode === 'paid' ? 'paid' : 'shared');
@@ -346,29 +340,6 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
           </section>
 
           <section className="flex min-w-0 flex-col gap-3">
-            <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-slate-800 bg-[#1a1d23] p-1">
-              <button
-                type="button"
-                onClick={() => handleChartModeChange('paid')}
-                aria-pressed={chartMode === 'paid'}
-                className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                  chartMode === 'paid' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                Paid by them
-              </button>
-              <button
-                type="button"
-                onClick={() => handleChartModeChange('share')}
-                aria-pressed={chartMode === 'share'}
-                className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                  chartMode === 'share' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                Their share
-              </button>
-            </div>
-
             <SpendingDonutChart
               slices={chartSlices}
               currency={baseCurrency}

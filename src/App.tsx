@@ -13,12 +13,16 @@ import {
 } from './components/AccountSecuritySheet';
 import { LandingPage } from './components/LandingPage';
 import { UiPreview } from './components/UiPreview';
-import { Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
+import { AccountAccess, Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
 import {
   changeAccountEmail,
   changeAccountPassword,
+  approveAccount,
+  getMyAccountAccess,
   isSupabaseConfigured,
+  listPendingAccountAccess,
+  rejectAccount,
   signInWithEmail,
   signOut,
   signUpWithEmail,
@@ -59,6 +63,7 @@ import {
   KeyRound,
   Plus,
   UserPlus,
+  UserX,
   X,
 } from 'lucide-react';
 import {
@@ -85,8 +90,18 @@ function PariteApp() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [accountAccess, setAccountAccess] = useState<AccountAccess | null>(null);
+  const [pendingAccountAccess, setPendingAccountAccess] = useState<AccountAccess[]>([]);
+  const [isAccountAccessLoading, setIsAccountAccessLoading] = useState(false);
+  const [busyAccountAction, setBusyAccountAction] = useState<{ userId: string; decision: 'approve' | 'reject' } | null>(null);
+  const [isMemberDataRefreshing, setIsMemberDataRefreshing] = useState(false);
   const authCardRef = useRef<HTMLElement | null>(null);
   const authEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const memberRefreshGenerationRef = useRef(0);
+  const memberRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const memberMutationInProgressRef = useRef(false);
+  const authUserIdRef = useRef<string | null>(null);
+  const accountRoleRef = useRef<AccountAccess['role'] | null>(null);
 
   const [inviteInput, setInviteInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
@@ -136,6 +151,13 @@ function PariteApp() {
     ? tripMembers.find(member => member.id === selectedBreakdownMemberId) ?? null
     : null;
   const isApprovedWorkspace = Boolean(activeTrip && currentMember?.status === 'approved');
+  const isApprovedAccount = accountAccess?.status === 'approved';
+  authUserIdRef.current = authUserId;
+  accountRoleRef.current = accountAccess?.role ?? null;
+  const memberManagementRequestCount = (currentMember?.role === 'admin'
+    ? tripMembers.filter(member => member.status === 'pending').length
+    : 0)
+    + (accountAccess?.role === 'admin' ? pendingAccountAccess.length : 0);
   const tripStatus = activeTrip?.status ?? 'active';
   const isTripActive = tripStatus === 'active';
 
@@ -287,6 +309,7 @@ function PariteApp() {
         if (error) throw error;
         if (cancelled) return;
         setAuthUser(data.session?.user ?? null);
+        setIsAccountAccessLoading(Boolean(data.session?.user));
         setAppError(null);
       } catch (error) {
         console.error(error);
@@ -305,6 +328,7 @@ function PariteApp() {
 
     const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => {
       setAuthUser(session?.user ?? null);
+      setIsAccountAccessLoading(Boolean(session?.user));
     }) ?? { data: { subscription: null } };
 
     return () => {
@@ -313,10 +337,58 @@ function PariteApp() {
     };
   }, []);
 
+  const refreshPendingAccountAccess = useCallback(async () => {
+    const requests = await listPendingAccountAccess();
+    setPendingAccountAccess(requests);
+  }, []);
+
+  useEffect(() => {
+    if (!authUserId || isBootstrapping) {
+      setAccountAccess(null);
+      setPendingAccountAccess([]);
+      setIsAccountAccessLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAccountAccess() {
+      setIsAccountAccessLoading(true);
+      try {
+        const access = await getMyAccountAccess();
+        if (cancelled) return;
+        setAccountAccess(access);
+        setAppError(null);
+
+        if (access.role === 'admin' && access.status === 'approved') {
+          const requests = await listPendingAccountAccess();
+          if (!cancelled) setPendingAccountAccess(requests);
+        } else {
+          setPendingAccountAccess([]);
+        }
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          setAccountAccess(null);
+          setPendingAccountAccess([]);
+          setAppError(error instanceof Error ? error.message : 'Could not verify account approval.');
+        }
+      } finally {
+        if (!cancelled) setIsAccountAccessLoading(false);
+      }
+    }
+
+    loadAccountAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUserId, isBootstrapping]);
+
   useEffect(() => {
     if (isBootstrapping) return;
 
-    if (!authUserId) {
+    if (!authUserId || !isApprovedAccount) {
       setWorkspace(null);
       setWorkspaces([]);
       clearActiveMemberId();
@@ -346,7 +418,7 @@ function PariteApp() {
     return () => {
       cancelled = true;
     };
-  }, [authUserId, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace, refreshWorkspaces]);
+  }, [authUserId, isApprovedAccount, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace, refreshWorkspaces]);
 
   const handleAuthSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -371,6 +443,7 @@ function PariteApp() {
 
       if (user) {
         setAuthUser(user);
+        setIsAccountAccessLoading(true);
         setAuthPassword('');
         setAuthMessage(null);
       } else {
@@ -389,6 +462,8 @@ function PariteApp() {
     try {
       await signOut();
       setAuthUser(null);
+      setAccountAccess(null);
+      setPendingAccountAccess([]);
       setWorkspace(null);
       setWorkspaces([]);
       setIsSideMenuOpen(false);
@@ -398,6 +473,166 @@ function PariteApp() {
     } catch (error) {
       console.error(error);
       setActionErrorFromUnknown(error, 'Could not log out.');
+    }
+  };
+
+  const handleAccountAccessDecision = async (userId: string, decision: 'approve' | 'reject') => {
+    if (busyAccountAction) return;
+
+    memberMutationInProgressRef.current = true;
+    memberRefreshGenerationRef.current += 1;
+    setBusyAccountAction({ userId, decision });
+    setActionError(null);
+    try {
+      if (decision === 'approve') {
+        await approveAccount(userId);
+      } else {
+        await rejectAccount(userId);
+      }
+      await refreshPendingAccountAccess();
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(
+        error,
+        decision === 'approve' ? 'Could not approve this account.' : 'Could not reject this account.',
+      );
+    } finally {
+      memberRefreshGenerationRef.current += 1;
+      memberMutationInProgressRef.current = false;
+      setBusyAccountAction(null);
+    }
+  };
+
+  const refreshMemberManagementData = useCallback((
+    memberId: string,
+    includeAccountRequests: boolean,
+  ): Promise<void> => {
+    if (memberMutationInProgressRef.current) return Promise.resolve();
+    if (memberRefreshInFlightRef.current) return memberRefreshInFlightRef.current;
+
+    const generation = ++memberRefreshGenerationRef.current;
+    const authUserIdAtStart = authUserIdRef.current;
+    const refreshPromise = (async () => {
+      const accountRequestPromise: Promise<AccountAccess[] | null> = includeAccountRequests
+        ? listPendingAccountAccess()
+        : Promise.resolve(null);
+      const [workspaceResult, accountRequestResult] = await Promise.allSettled([
+        loadAuthWorkspace(memberId),
+        accountRequestPromise,
+      ]);
+
+      if (
+        generation !== memberRefreshGenerationRef.current
+        || authUserIdAtStart !== authUserIdRef.current
+        || memberMutationInProgressRef.current
+      ) return;
+
+      let refreshError: unknown = null;
+
+      if (workspaceResult.status === 'fulfilled') {
+        const nextWorkspace = workspaceResult.value;
+        setWorkspace(current => {
+          if (current?.currentMember?.id !== memberId || nextWorkspace.currentMember?.id !== memberId) {
+            return current;
+          }
+          return {
+            ...current,
+            currentMember: nextWorkspace.currentMember,
+            members: nextWorkspace.members,
+          };
+        });
+      } else {
+        refreshError = workspaceResult.reason;
+      }
+
+      if (accountRequestResult.status === 'fulfilled') {
+        if (
+          includeAccountRequests
+          && accountRoleRef.current === 'admin'
+          && accountRequestResult.value
+        ) {
+          setPendingAccountAccess(accountRequestResult.value);
+        }
+      } else {
+        refreshError ??= accountRequestResult.reason;
+      }
+
+      if (refreshError) throw refreshError;
+    })();
+
+    const trackedPromise = refreshPromise.finally(() => {
+      if (memberRefreshInFlightRef.current === trackedPromise) {
+        memberRefreshInFlightRef.current = null;
+      }
+    });
+    memberRefreshInFlightRef.current = trackedPromise;
+    return trackedPromise;
+  }, []);
+
+  useEffect(() => {
+    memberRefreshGenerationRef.current += 1;
+    memberRefreshInFlightRef.current = null;
+  }, [accountAccess?.role, authUserId, currentMember?.id]);
+
+  const handleRefreshMembers = async () => {
+    if (!currentMember) return;
+
+    setIsMemberDataRefreshing(true);
+    setActionError(null);
+    try {
+      await refreshMemberManagementData(currentMember.id, accountAccess?.role === 'admin');
+    } catch (error) {
+      console.error(error);
+      setActionErrorFromUnknown(error, 'Could not refresh member requests.');
+    } finally {
+      setIsMemberDataRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    const memberId = currentMember?.id;
+    if (!memberId || currentMember.status !== 'approved') return;
+
+    let cancelled = false;
+    const includeAccountRequests = accountAccess?.role === 'admin';
+
+    const refreshInBackground = async () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      try {
+        await refreshMemberManagementData(memberId, includeAccountRequests);
+      } catch (error) {
+        console.error('Could not refresh member management data.', error);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refreshInBackground();
+    };
+
+    void refreshInBackground();
+    const intervalId = window.setInterval(refreshInBackground, activeTab === 'members' ? 8000 : 20000);
+    window.addEventListener('focus', refreshInBackground);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshInBackground);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [accountAccess?.role, activeTab, currentMember?.id, currentMember?.status, refreshMemberManagementData]);
+
+  const handleCheckAccountApproval = async () => {
+    setIsAccountAccessLoading(true);
+    setAppError(null);
+    try {
+      const access = await getMyAccountAccess();
+      setAccountAccess(access);
+    } catch (error) {
+      console.error(error);
+      setAppError(error instanceof Error ? error.message : 'Could not verify account approval.');
+    } finally {
+      setIsAccountAccessLoading(false);
     }
   };
 
@@ -494,6 +729,8 @@ function PariteApp() {
       throw new Error('Group member is not loaded.');
     }
 
+    memberMutationInProgressRef.current = true;
+    memberRefreshGenerationRef.current += 1;
     setActionError(null);
     try {
       await action();
@@ -503,6 +740,9 @@ function PariteApp() {
       console.error(error);
       setActionErrorFromUnknown(error, 'Action failed.');
       throw error;
+    } finally {
+      memberRefreshGenerationRef.current += 1;
+      memberMutationInProgressRef.current = false;
     }
   };
 
@@ -972,7 +1212,9 @@ function PariteApp() {
               {authMode === 'signup' ? 'Create your account' : 'Log in to continue'}
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-2 leading-relaxed">
-              Sign in to keep your group access across browsers and devices.
+              {authMode === 'signup'
+                ? 'New accounts can sign up now and will be reviewed by an admin before access is enabled.'
+                : 'Sign in to keep your group access across browsers and devices.'}
             </p>
           </div>
 
@@ -1120,6 +1362,77 @@ function PariteApp() {
     </div>
   ) : null;
 
+  const renderAccountApprovalGate = () => {
+    if (isAccountAccessLoading) {
+      return renderCenteredMessage('Checking account access', 'Confirming your approval status.');
+    }
+
+    if (!accountAccess) {
+      return (
+        <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 bg-[#121418]">
+          <div className="w-14 h-14 bg-rose-600/15 border border-rose-500/25 rounded-2xl flex items-center justify-center text-rose-300">
+            <AlertOctagon className="w-7 h-7" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-white font-display">Could not verify account access</h1>
+            <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
+              {appError ?? 'Ask an administrator to check your account approval record.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="min-h-11 rounded-xl border border-slate-700 px-5 text-xs font-bold text-slate-200 cursor-pointer"
+          >
+            Log out
+          </button>
+        </div>
+      );
+    }
+
+    const rejected = accountAccess.status === 'rejected';
+    return (
+      <div className="px-6 py-8 flex flex-col justify-center items-center text-center gap-5 flex-1 bg-[#121418]">
+        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border ${
+          rejected
+            ? 'bg-rose-600/15 border-rose-500/25 text-rose-300'
+            : 'bg-amber-500/15 border-amber-400/25 text-amber-300'
+        }`}>
+          {rejected ? <UserX className="w-7 h-7" /> : <Clock className="w-7 h-7" />}
+        </div>
+        <div>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{accountAccess.email}</p>
+          <h1 className="text-lg font-bold text-white font-display mt-2">
+            {rejected ? 'Account request declined' : 'Waiting for admin approval'}
+          </h1>
+          <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
+            {rejected
+              ? 'An administrator declined this account request. Contact the admin if you believe this was a mistake.'
+              : 'Your account was created successfully. You can use Parité after an administrator approves it.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {!rejected && (
+            <button
+              type="button"
+              onClick={handleCheckAccountApproval}
+              className="min-h-11 rounded-xl bg-indigo-600 px-5 text-xs font-bold text-slate-950 cursor-pointer"
+            >
+              Check approval
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="min-h-11 rounded-xl border border-slate-700 px-5 text-xs font-bold text-slate-200 cursor-pointer"
+          >
+            Log out
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderActionErrorBanner = (className = '') => actionError ? (
     <div className={`sticky top-0 z-50 w-full bg-[#e07a5f] border-y border-[#e07a5f] text-[#3d405b] shadow-lg ${className}`}>
       <div className="px-4 py-3 flex items-start gap-3">
@@ -1240,6 +1553,16 @@ function PariteApp() {
     );
   }
 
+  if (isSupabaseConfigured && !isBootstrapping && authUser && !isApprovedAccount) {
+    return (
+      <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center font-sans overflow-hidden">
+        <div className="parite-shell w-full max-w-md bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
+          {renderAccountApprovalGate()}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center select-none font-sans overflow-hidden">
       <div className="parite-shell w-full max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
@@ -1273,17 +1596,11 @@ function PariteApp() {
               onShowTripSelection={handleShowTripSelection}
               onCreateTrip={handleStartCreateTrip}
               onJoinTrip={handleStartJoinTrip}
-              pendingRequestsCount={tripMembers.filter(member => member.status === 'pending').length}
               onAdminTools={() => {
                 setMembersInitialCategory('approved');
                 setActiveTab('members');
               }}
-              onPendingRequests={() => {
-                setMembersInitialCategory('requests');
-                setActiveTab('members');
-              }}
               onExchangeRates={() => setIsExchangeRatesOpen(true)}
-              onRegenerateInviteCode={handleRegenerateTripInviteCode}
               onUpdateTripName={handleUpdateTripName}
               onUpdateDisplayCurrency={handleUpdateDisplayCurrency}
               onLeaveTrip={handleLeaveTrip}
@@ -1333,8 +1650,8 @@ function PariteApp() {
                   setSelectedExpenseIdForDetail(null);
                   setIsAddingExpense(false);
                 }}
-                pendingRequestsCount={tripMembers.filter(member => member.status === 'pending').length}
-                showAdminBadge={currentMember.role === 'admin'}
+                pendingRequestsCount={memberManagementRequestCount}
+                showAdminBadge={currentMember.role === 'admin' || accountAccess?.role === 'admin'}
               />
             )}
           </>
@@ -1668,6 +1985,11 @@ function PariteApp() {
                     trip={activeTrip}
                     currentMember={currentMember}
                     members={tripMembers}
+                    accountRequests={accountAccess?.role === 'admin' ? pendingAccountAccess : []}
+                    isPlatformAdmin={accountAccess?.role === 'admin'}
+                    busyAccountUserId={busyAccountAction?.userId ?? null}
+                    busyAccountDecision={busyAccountAction?.decision ?? null}
+                    isRefreshing={isMemberDataRefreshing}
                     initialCategory={membersInitialCategory}
                     onApproveMember={handleApproveMember}
                     onRejectMember={handleRejectMember}
@@ -1675,6 +1997,10 @@ function PariteApp() {
                     onPromoteMember={handlePromoteMember}
                     onDemoteAdmin={handleDemoteAdmin}
                     onViewMemberSpending={setSelectedBreakdownMemberId}
+                    onApproveAccount={userId => handleAccountAccessDecision(userId, 'approve')}
+                    onRejectAccount={userId => handleAccountAccessDecision(userId, 'reject')}
+                    onRegenerateInviteCode={handleRegenerateTripInviteCode}
+                    onRefresh={handleRefreshMembers}
                   />
                 )}
               </div>
@@ -1690,8 +2016,8 @@ function PariteApp() {
               setSelectedExpenseIdForDetail(null);
               setIsAddingExpense(false);
             }}
-            pendingRequestsCount={tripMembers.filter(member => member.status === 'pending').length}
-            showAdminBadge={currentMember.role === 'admin'}
+            pendingRequestsCount={memberManagementRequestCount}
+            showAdminBadge={currentMember.role === 'admin' || accountAccess?.role === 'admin'}
           />
         )}
       </div>

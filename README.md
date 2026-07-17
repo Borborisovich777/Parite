@@ -5,6 +5,7 @@ Parité is a mobile-first trip expense splitting app built with React, Vite, Typ
 ## Current Features
 
 - Supabase Auth email/password accounts.
+- New-account registration with platform-admin approval before app access.
 - Multi-trip workspace switching with `parite_active_member_id` restore.
 - Invite-code join flow with admin approval/rejection.
 - Member roles with admin promotion and demotion.
@@ -80,6 +81,8 @@ Paste into **Supabase -> SQL Editor -> New query** and run it. Then reload the P
 notify pgrst, 'reload schema';
 ```
 
+Then apply the incremental patches listed below in order so the fresh project has the current feature and guard updates.
+
 `supabase/migrations/202606080001_initial_tripbalance.sql` is a legacy early baseline kept for history. Use `202606090001_phase1_contract_repair.sql` for a current fresh setup.
 
 ### Existing Project Incremental Setup
@@ -94,6 +97,8 @@ If your Supabase project already has the earlier Parité schema, run these incre
 6. `supabase/migrations/202606110001_phase49_admin_settings.sql`
 7. `supabase/migrations/202606110002_phase49a_admin_demotion.sql`
 8. `supabase/migrations/202606110003_phase53_usd_currency.sql`
+9. `supabase/migrations/202607170001_account_approval.sql`
+10. `supabase/migrations/202607170002_voided_settlement_expense_guard.sql`
 
 Each patch is intended to be pasted into the Supabase SQL Editor and run once. Most DDL is idempotent where practical. After the final patch, run:
 
@@ -106,6 +111,10 @@ notify pgrst, 'reload schema';
 The current app expects these public RPCs to exist:
 
 - `create_trip_with_admin`
+- `get_my_account_access`
+- `list_pending_account_access`
+- `approve_account`
+- `reject_account`
 - `request_join_by_invite`
 - `load_auth_workspace`
 - `list_my_workspaces`
@@ -144,6 +153,12 @@ order by proname;
 ## Supabase Auth
 
 Open **Authentication -> Providers -> Email** in Supabase.
+
+Turn on **Allow new users to sign up**. Application access is still private: the
+account approval migration makes every new account pending until the platform
+admin approves it in Parité. Existing accounts remain approved, and the earliest
+existing account becomes the initial platform admin. On an empty project, the
+first signup becomes the initial admin.
 
 For local testing, disabling email confirmations can make sign-up faster. For production, choose the email confirmation policy you want and test the sign-up flow with that setting enabled.
 

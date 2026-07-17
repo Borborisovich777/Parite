@@ -8,7 +8,7 @@ import { MemberBreakdownSheet } from './MemberBreakdownSheet';
 import { MembersTab } from './MembersTab';
 import { SideMenu } from './SideMenu';
 import { createUiPreviewWorkspace } from '../lib/uiPreviewData';
-import type { Expense, ExpenseSplit, Member, Settlement } from '../types';
+import type { AccountAccess, Expense, ExpenseSplit, Member, Settlement } from '../types';
 
 type ExpenseTabProps = React.ComponentProps<typeof ExpensesTab>;
 type BalanceTabProps = React.ComponentProps<typeof BalancesTab>;
@@ -26,6 +26,14 @@ export const UiPreview: React.FC = () => {
   const [previewEmail] = useState('mira@example.com');
   const [previewPendingEmail, setPreviewPendingEmail] = useState<string | null>(null);
   const [selectedBreakdownMemberId, setSelectedBreakdownMemberId] = useState<string | null>(null);
+  const [previewAccountRequests, setPreviewAccountRequests] = useState<AccountAccess[]>(() => [{
+    user_id: 'preview-account-sami',
+    email: 'sami@example.com',
+    role: 'user',
+    status: 'pending',
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  }]);
 
   const trip = workspace.trip!;
   const currentMember = workspace.currentMember!;
@@ -244,7 +252,6 @@ export const UiPreview: React.FC = () => {
             approved_at: currentMember.approved_at,
           }]}
           currentMemberId={currentMember.id}
-          pendingRequestsCount={0}
           onClose={() => setIsSideMenuOpen(false)}
           onSwitchWorkspace={async () => setIsSideMenuOpen(false)}
           onShowTripSelection={() => setIsSideMenuOpen(false)}
@@ -254,12 +261,7 @@ export const UiPreview: React.FC = () => {
             changeTab('members');
             setIsSideMenuOpen(false);
           }}
-          onPendingRequests={() => {
-            changeTab('members');
-            setIsSideMenuOpen(false);
-          }}
           onExchangeRates={() => setIsSideMenuOpen(false)}
-          onRegenerateInviteCode={async () => undefined}
           onUpdateTripName={async name => setWorkspace(previous => ({
             ...previous,
             trip: previous.trip ? { ...previous.trip, name } : previous.trip,
@@ -288,7 +290,7 @@ export const UiPreview: React.FC = () => {
           variant="desktop"
           activeTab={activeTab}
           onChangeTab={changeTab}
-          pendingRequestsCount={0}
+          pendingRequestsCount={previewAccountRequests.length}
           showAdminBadge
         />
 
@@ -334,6 +336,8 @@ export const UiPreview: React.FC = () => {
               trip={trip}
               currentMember={currentMember}
               members={workspace.members}
+              accountRequests={previewAccountRequests}
+              isPlatformAdmin
               initialCategory="approved"
               onApproveMember={approveMember}
               onRejectMember={rejectMember}
@@ -341,6 +345,13 @@ export const UiPreview: React.FC = () => {
               onPromoteMember={promoteMember}
               onDemoteAdmin={demoteMember}
               onViewMemberSpending={setSelectedBreakdownMemberId}
+              onApproveAccount={async userId => setPreviewAccountRequests(previous => previous.filter(request => request.user_id !== userId))}
+              onRejectAccount={async userId => setPreviewAccountRequests(previous => previous.filter(request => request.user_id !== userId))}
+              onRegenerateInviteCode={async () => setWorkspace(previous => ({
+                ...previous,
+                trip: previous.trip ? { ...previous.trip, invite_code: 'NEWCODE' } : previous.trip,
+              }))}
+              onRefresh={async () => undefined}
             />
           )}
 
@@ -362,7 +373,7 @@ export const UiPreview: React.FC = () => {
         <BottomNav
           activeTab={activeTab}
           onChangeTab={changeTab}
-          pendingRequestsCount={0}
+          pendingRequestsCount={previewAccountRequests.length}
           showAdminBadge
         />
       </div>
