@@ -19,7 +19,19 @@ export function requireSupabase(): SupabaseClient {
 
 function throwAuthError(error: unknown): never {
   if (error && typeof error === 'object' && 'message' in error) {
-    throw new Error(String((error as { message: unknown }).message));
+    const authError = new Error(String((error as { message: unknown }).message)) as Error & {
+      code?: string;
+      reasons?: string[];
+    };
+    const code = 'code' in error ? (error as { code?: unknown }).code : undefined;
+    const reasons = 'reasons' in error ? (error as { reasons?: unknown }).reasons : undefined;
+
+    if (typeof code === 'string') authError.code = code;
+    if (Array.isArray(reasons)) {
+      authError.reasons = reasons.filter((reason): reason is string => typeof reason === 'string');
+    }
+
+    throw authError;
   }
 
   throw new Error('Authentication failed.');
@@ -43,4 +55,43 @@ export async function signOut(): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.auth.signOut();
   if (error) throwAuthError(error);
+}
+
+async function reauthenticateWithPassword(email: string, currentPassword: string): Promise<User> {
+  const client = requireSupabase();
+  const { data, error } = await client.auth.signInWithPassword({
+    email,
+    password: currentPassword,
+  });
+  if (error) throwAuthError(error);
+  if (!data.user) throw new Error('Could not verify the signed-in account.');
+  return data.user;
+}
+
+export async function changeAccountEmail(
+  currentEmail: string,
+  currentPassword: string,
+  nextEmail: string,
+): Promise<User> {
+  const client = requireSupabase();
+  await reauthenticateWithPassword(currentEmail, currentPassword);
+
+  const { data, error } = await client.auth.updateUser({ email: nextEmail });
+  if (error) throwAuthError(error);
+  if (!data.user) throw new Error('Could not update the account email.');
+  return data.user;
+}
+
+export async function changeAccountPassword(
+  email: string,
+  currentPassword: string,
+  nextPassword: string,
+): Promise<User> {
+  const client = requireSupabase();
+  await reauthenticateWithPassword(email, currentPassword);
+
+  const { data, error } = await client.auth.updateUser({ password: nextPassword });
+  if (error) throwAuthError(error);
+  if (!data.user) throw new Error('Could not update the account password.');
+  return data.user;
 }
