@@ -279,8 +279,8 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
         onClick={onClose}
       />
 
-      <section className="relative z-10 flex max-h-[92dvh] w-full max-w-md flex-col rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-4xl md:rounded-[28px]">
-        <div className="border-b border-slate-800 px-4 py-4 flex items-center justify-between gap-3">
+      <section className="relative z-10 flex max-h-[92dvh] min-h-0 w-full max-w-md flex-col overflow-hidden rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-4xl md:rounded-[28px]">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <MemberAvatar member={member} size="lg" />
             <div className="min-w-0">
@@ -302,7 +302,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
           </button>
         </div>
 
-        <div className="overflow-y-auto px-4 py-4 flex flex-col gap-4">
+        <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <MetricCard label="Paid" amount={memberMetrics.totalPaid} icon={<Wallet className="w-4 h-4" />} />
             <MetricCard label="Share" amount={memberMetrics.totalShare} icon={<Scale className="w-4 h-4" />} />

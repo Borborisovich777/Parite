@@ -272,7 +272,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
           </button>
         </div>
 
-        <div className="no-scrollbar flex flex-1 flex-col gap-3 overflow-y-auto px-3.5 py-4">
+        <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3.5 py-4">
           <section className="parite-card p-4">
             <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
               Signed in as

@@ -1340,8 +1340,10 @@ function PariteApp() {
           </>
         )}
 
-        <div className={`flex-1 min-h-0 flex flex-col overflow-y-auto no-scrollbar select-text bg-[#121418] ${
-            isApprovedWorkspace ? 'mb-[calc(68px+env(safe-area-inset-bottom))] md:mb-0' : ''
+        <div className={`no-scrollbar flex min-h-0 flex-1 flex-col select-text bg-[#121418] ${
+            isApprovedWorkspace
+              ? 'mb-[calc(68px+env(safe-area-inset-bottom))] overflow-hidden md:mb-0'
+              : 'overflow-y-auto'
         }`}>
           {!isSupabaseConfigured && renderCenteredMessage(
             'Supabase is not configured',
@@ -1615,7 +1617,7 @@ function PariteApp() {
           )}
 
           {activeTrip && currentMember && currentMember.status === 'approved' && (
-            <div className="flex-1 flex flex-col bg-[#121418]">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#121418]">
               {renderActionErrorBanner()}
 
               {!actionError && isWorkspaceLoading && (
@@ -1624,7 +1626,7 @@ function PariteApp() {
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto">
+              <div className={`min-h-0 flex-1 ${activeTab === 'expenses' ? 'overflow-hidden' : 'no-scrollbar overflow-y-auto'}`}>
                 {activeTab === 'expenses' && (
                   <ExpensesTab
                     trip={activeTrip}

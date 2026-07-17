@@ -206,7 +206,7 @@ export const UiPreview: React.FC = () => {
 
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center font-sans overflow-hidden">
-      <div className="mobile-prototype parite-shell w-full max-w-md md:max-w-3xl lg:max-w-5xl bg-[var(--color-app-background)] border border-[var(--color-border)] md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
+      <div className="mobile-prototype parite-shell relative flex h-[100dvh] w-full max-w-md flex-col overflow-hidden border border-[var(--color-border)] bg-[var(--color-app-background)] shadow-2xl md:h-[calc(100dvh-3rem)] md:max-w-3xl md:rounded-[36px] lg:max-w-5xl xl:max-w-6xl">
         <AccountSecuritySheet
           isOpen={isAccountSecurityOpen}
           currentEmail={previewEmail}
@@ -292,7 +292,9 @@ export const UiPreview: React.FC = () => {
           showAdminBadge
         />
 
-        <main className="flex-1 min-h-0 overflow-y-auto bg-[var(--color-app-background)] mb-[calc(68px+env(safe-area-inset-bottom))] md:mb-0">
+        <main className={`flex min-h-0 flex-1 flex-col bg-[var(--color-app-background)] mb-[calc(68px+env(safe-area-inset-bottom))] md:mb-0 ${
+          activeTab === 'expenses' ? 'overflow-hidden' : 'no-scrollbar overflow-y-auto'
+        }`}>
           {activeTab === 'expenses' && (
             <ExpensesTab
               trip={trip}

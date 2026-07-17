@@ -165,8 +165,8 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
         onClick={onClose}
       />
 
-      <section className="relative z-10 w-full max-w-md rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-2xl md:rounded-[28px]">
-        <div className="px-4 py-4 border-b border-slate-800 flex items-center justify-between gap-3">
+      <section className="relative z-10 flex max-h-[94dvh] min-h-0 w-full max-w-md flex-col overflow-hidden rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-h-[calc(100dvh-3rem)] md:max-w-2xl md:rounded-[28px]">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-4">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
               Exchange rates
@@ -185,7 +185,7 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
           </button>
         </div>
 
-        <div className="px-4 py-4 flex flex-col gap-3">
+        <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
           {error && (
             <div className="rounded-2xl border border-[#e07a5f] bg-[#e07a5f] px-3 py-2 text-xs font-bold text-[#3d405b]">
               {error}

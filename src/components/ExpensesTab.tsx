@@ -709,7 +709,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
 
   return (
-    <div className={`relative flex h-full flex-col pb-20 md:pb-0 ${isFormOpen ? '' : 'animate-fade-in'}`}>
+    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden pb-20 md:pb-0 ${isFormOpen ? '' : 'animate-fade-in'}`}>
       {isFormOpen ? (
         <form
           onSubmit={handleFormSubmit}
@@ -735,7 +735,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             <div className="w-10" />
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-5 md:px-6 lg:px-8">
+          <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6 lg:px-8">
             {formError && (
               <div className="mx-auto mb-4 max-w-4xl bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -1568,11 +1568,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   type="button"
                   id="btn-add-expense-tab"
                   onClick={handleOpenAddForm}
-                  className="flex h-12 w-12 cursor-pointer items-center justify-center rounded-full bg-[#4fa889] text-white shadow-[0_8px_22px_rgba(79,168,137,0.3)] transition active:scale-95"
+                  className="flex h-12 w-12 cursor-pointer items-center justify-center gap-2 rounded-full bg-[#4fa889] text-white shadow-[0_8px_22px_rgba(79,168,137,0.3)] transition active:scale-95 md:h-auto md:min-h-11 md:w-auto md:rounded-2xl md:px-4"
                   title="Add expense"
                   aria-label="Add expense"
                 >
                   <Plus className="h-6 w-6 stroke-[2.5]" />
+                  <span className="hidden text-sm font-bold md:inline">Add expense</span>
                 </button>
               )}
             </div>
@@ -1779,8 +1780,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
       {detailExpense && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center z-50 p-4 md:items-center">
-          <div className="bg-[#121418] w-full max-w-sm md:max-w-xl rounded-[24px] shadow-2xl overflow-hidden max-h-[85vh] flex flex-col border border-slate-800 animate-slide-up">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <div className="flex max-h-[85dvh] min-h-0 w-full max-w-sm flex-col overflow-hidden rounded-[24px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-5 py-4">
               <h3 className="text-sm font-bold text-white font-display">Expense details</h3>
               <button
                 type="button"
@@ -1792,7 +1793,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </button>
             </div>
 
-            <div className="px-5 py-4 overflow-y-auto flex-1 flex flex-col gap-4 no-scrollbar">
+            <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
               <div className="flex items-center gap-3">
                 <ExpenseIcon
                   title={detailExpense.title}
