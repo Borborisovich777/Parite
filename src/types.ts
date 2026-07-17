@@ -2,6 +2,20 @@ export type Currency = 'AED' | 'CNY' | 'KZT' | 'USD';
 export const SUPPORTED_CURRENCIES: Currency[] = ['AED', 'CNY', 'KZT', 'USD'];
 export type TripStatus = 'active' | 'closing' | 'closed';
 
+export type AccountRole = 'admin' | 'user';
+export type AccountStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AccountAccess {
+  user_id: string;
+  email: string;
+  role: AccountRole;
+  status: AccountStatus;
+  created_at: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  updated_at: string;
+}
+
 export interface Trip {
   id: string;
   name: string;

@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
-  Check,
-  Copy,
   Download,
   Edit2,
   KeyRound,
@@ -29,7 +27,6 @@ interface SideMenuProps {
   accountEmail: string | null;
   workspaces: WorkspaceSummary[];
   currentMemberId: string | null;
-  pendingRequestsCount: number;
   onClose: () => void;
   onAccountSettings: () => void;
   onSwitchWorkspace: (memberId: string) => void | Promise<void>;
@@ -37,9 +34,7 @@ interface SideMenuProps {
   onCreateTrip: () => void;
   onJoinTrip: () => void;
   onAdminTools: () => void;
-  onPendingRequests: () => void;
   onExchangeRates: () => void;
-  onRegenerateInviteCode: () => Promise<void>;
   onUpdateTripName: (name: string) => Promise<void>;
   onUpdateDisplayCurrency: (displayCurrency: Currency | null) => Promise<void>;
   onLeaveTrip: () => Promise<void>;
@@ -61,7 +56,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   accountEmail,
   workspaces,
   currentMemberId,
-  pendingRequestsCount,
   onClose,
   onAccountSettings,
   onSwitchWorkspace,
@@ -69,9 +63,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   onCreateTrip,
   onJoinTrip,
   onAdminTools,
-  onPendingRequests,
   onExchangeRates,
-  onRegenerateInviteCode,
   onUpdateTripName,
   onUpdateDisplayCurrency,
   onLeaveTrip,
@@ -94,12 +86,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   const [displayCurrencyInput, setDisplayCurrencyInput] = useState<Currency | ''>(currentMember?.display_currency ?? '');
   const [isSavingDisplayCurrency, setIsSavingDisplayCurrency] = useState(false);
   const [lifecycleBusyAction, setLifecycleBusyAction] = useState<LifecycleAction | null>(null);
-  const [isRegeneratingInvite, setIsRegeneratingInvite] = useState(false);
   const [isSavingTripName, setIsSavingTripName] = useState(false);
   const [displayCurrencyError, setDisplayCurrencyError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [tripNameInput, setTripNameInput] = useState(trip.name);
-  const [copiedInvite, setCopiedInvite] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -117,7 +107,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({
     setDisplayCurrencyError(null);
     setSettingsError(null);
     setTripNameInput(trip.name);
-    setCopiedInvite(false);
   }, [currentMember?.display_currency, isOpen, trip.name, trip.invite_code]);
 
   if (!isOpen) return null;
@@ -134,39 +123,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   const reportSettingsError = (message: string) => {
     setSettingsError(message);
     onActionError?.(message);
-  };
-
-  const copyText = async (text: string) => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-9999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-
-    try {
-      document.execCommand('copy');
-    } finally {
-      document.body.removeChild(textArea);
-    }
-  };
-
-  const handleCopyInvite = () => {
-    copyText(trip.invite_code)
-      .then(() => {
-        setCopiedInvite(true);
-        window.setTimeout(() => setCopiedInvite(false), 1800);
-      })
-      .catch(error => {
-        console.error(error);
-        reportSettingsError('Could not copy invite code.');
-      });
   };
 
   const handleSaveTripName = async () => {
@@ -186,22 +142,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({
       reportSettingsError(getSafeMessage(error, 'Could not rename group.'));
     } finally {
       setIsSavingTripName(false);
-    }
-  };
-
-  const handleRegenerateInvite = async () => {
-    if (!confirm('Regenerate this invite code? The old code will stop working.')) return;
-
-    setIsRegeneratingInvite(true);
-    setSettingsError(null);
-    try {
-      await onRegenerateInviteCode();
-      setCopiedInvite(false);
-    } catch (error) {
-      console.error(error);
-      reportSettingsError(getSafeMessage(error, 'Could not regenerate invite code.'));
-    } finally {
-      setIsRegeneratingInvite(false);
     }
   };
 
@@ -368,7 +308,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     Admin settings
                   </span>
                   <span className="mt-1 block text-xs text-[var(--color-muted)]">
-                    Invite, members, and lifecycle
+                    Group settings and lifecycle
                   </span>
                 </span>
                 <ShieldCheck className="h-4 w-4 text-[var(--color-positive)]" />
@@ -382,8 +322,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 )}
 
                 {isTripActive ? (
-                  <>
-                    <div>
+                  <div>
                       <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
                         Group name
                       </label>
@@ -405,44 +344,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                           {isSavingTripName ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />}
                         </button>
                       </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
-                          Invite code
-                        </p>
-                        {copiedInvite && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[var(--color-positive)]">
-                            <Check className="w-3.5 h-3.5" />
-                            Copied
-                          </span>
-                        )}
-                      </div>
-                      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-4 py-3 font-mono text-lg font-bold tracking-widest text-[var(--color-text)]">
-                        {trip.invite_code}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <button
-                          type="button"
-                          onClick={handleCopyInvite}
-                          className="min-h-10 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-positive)] px-3 py-2 flex items-center justify-center gap-2 font-bold text-xs cursor-pointer"
-                        >
-                          <Copy className="w-4 h-4" />
-                          Copy
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleRegenerateInvite}
-                          disabled={isRegeneratingInvite}
-                          className="min-h-10 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] text-[var(--color-negative)] px-3 py-2 flex items-center justify-center gap-2 font-bold text-xs cursor-pointer disabled:opacity-60"
-                        >
-                          <RefreshCw className={`w-4 h-4 ${isRegeneratingInvite ? 'animate-spin' : ''}`} />
-                          Regenerate
-                        </button>
-                      </div>
-                    </div>
-                  </>
+                  </div>
                 ) : (
                   <p className="rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 py-2 text-xs font-semibold text-[var(--color-negative)] leading-relaxed">
                     Admin settings are read-only while this group is {tripStatus}.
@@ -452,24 +354,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 <div className="grid grid-cols-1 gap-2">
                   {isTripActive && (
                     <>
-                      <button
-                        type="button"
-                        id="btn-menu-pending-requests"
-                        onClick={() => {
-                          onPendingRequests();
-                          onClose();
-                        }}
-                        className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center justify-between gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <UserPlus className="h-4 w-4 text-[var(--color-positive)]" />
-                          Pending requests
-                        </span>
-                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-mono text-[var(--color-muted)]">
-                          {pendingRequestsCount}
-                        </span>
-                      </button>
-
                       <button
                         type="button"
                         id="btn-menu-admin-tools"
