@@ -13,6 +13,7 @@ import {
 } from './components/AccountSecuritySheet';
 import { LandingPage } from './components/LandingPage';
 import { UiPreview } from './components/UiPreview';
+import { GuidedTour, type GuidedTourStep } from './components/GuidedTour';
 import { AccountAccess, Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
 import {
@@ -71,6 +72,10 @@ import {
   exportExpensesCsv,
   exportSettlementsCsv,
 } from './lib/csvExport';
+import {
+  hasCompletedGuidedTour,
+  saveGuidedTourCompletion,
+} from './lib/guidedTourPreferences';
 
 const LEGACY_MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
 const LEGACY_ACTIVE_MEMBER_ID_KEY = 'tripbalance_active_member_id';
@@ -83,6 +88,8 @@ function PariteApp() {
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isExchangeRatesOpen, setIsExchangeRatesOpen] = useState(false);
   const [isAccountSecurityOpen, setIsAccountSecurityOpen] = useState(false);
+  const [isGuidedTourOpen, setIsGuidedTourOpen] = useState(false);
+  const [guidedTourUserId, setGuidedTourUserId] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authEmail, setAuthEmail] = useState('');
@@ -105,6 +112,7 @@ function PariteApp() {
   const memberMutationInProgressRef = useRef(false);
   const authUserIdRef = useRef<string | null>(null);
   const accountRoleRef = useRef<AccountAccess['role'] | null>(null);
+  const guidedTourAutoStartedUserRef = useRef<string | null>(null);
 
   const [inviteInput, setInviteInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
@@ -169,6 +177,121 @@ function PariteApp() {
   useEffect(() => {
     setIsAccountSecurityOpen(false);
   }, [authUserId]);
+
+  useEffect(() => {
+    if (!guidedTourUserId || guidedTourUserId === authUserId) return;
+    if (guidedTourAutoStartedUserRef.current === guidedTourUserId) {
+      guidedTourAutoStartedUserRef.current = null;
+    }
+    setIsGuidedTourOpen(false);
+    setGuidedTourUserId(null);
+  }, [authUserId, guidedTourUserId]);
+
+  const prepareGuidedTourStep = useCallback((step: GuidedTourStep) => {
+    setSelectedExpenseIdForDetail(null);
+    setSelectedBreakdownMemberId(null);
+    setIsAddingExpense(false);
+    setIsExchangeRatesOpen(false);
+    setIsAccountSecurityOpen(false);
+    setIsSideMenuOpen(step.id === 'groups');
+
+    if (step.id === 'settlements') {
+      setActiveTab('balances');
+    } else if (step.id === 'members') {
+      setActiveTab('members');
+    } else {
+      setActiveTab('expenses');
+    }
+  }, []);
+
+  const handleReplayGuidedTour = useCallback(() => {
+    const userId = authUserIdRef.current;
+    if (!userId || !isApprovedWorkspace || !isTripActive) return;
+
+    guidedTourAutoStartedUserRef.current = userId;
+    setGuidedTourUserId(userId);
+    setIsGuidedTourOpen(true);
+  }, [isApprovedWorkspace, isTripActive]);
+
+  const closeGuidedTour = useCallback((status: 'completed' | 'skipped') => {
+    const userId = guidedTourUserId;
+    if (userId && userId === authUserIdRef.current) {
+      saveGuidedTourCompletion(userId, status);
+    }
+
+    setIsGuidedTourOpen(false);
+    setGuidedTourUserId(null);
+    setIsSideMenuOpen(false);
+    setActiveTab('expenses');
+  }, [guidedTourUserId]);
+
+  const handleCompleteGuidedTour = useCallback(
+    () => closeGuidedTour('completed'),
+    [closeGuidedTour],
+  );
+  const handleSkipGuidedTour = useCallback(
+    () => closeGuidedTour('skipped'),
+    [closeGuidedTour],
+  );
+
+  useEffect(() => {
+    const isCurrentApprovedAccount = Boolean(
+      authUserId
+      && accountAccess?.user_id === authUserId
+      && accountAccess.status === 'approved',
+    );
+    const hasCompetingSurface = isSideMenuOpen
+      || isExchangeRatesOpen
+      || isAccountSecurityOpen
+      || isAddingExpense
+      || Boolean(selectedExpenseIdForDetail)
+      || Boolean(selectedBreakdownMemberId)
+      || isCreatingTripView
+      || isJoiningTripView;
+
+    if (!authUserId
+      || !isCurrentApprovedAccount
+      || !isApprovedWorkspace
+      || !isTripActive
+      || isBootstrapping
+      || isWorkspaceLoading
+      || isGuidedTourOpen
+      || hasCompetingSurface
+      || guidedTourAutoStartedUserRef.current === authUserId) {
+      return undefined;
+    }
+
+    if (hasCompletedGuidedTour(authUserId)) {
+      guidedTourAutoStartedUserRef.current = authUserId;
+      return undefined;
+    }
+
+    const startTimer = window.setTimeout(() => {
+      if (authUserIdRef.current !== authUserId) return;
+      guidedTourAutoStartedUserRef.current = authUserId;
+      setGuidedTourUserId(authUserId);
+      setIsGuidedTourOpen(true);
+    }, 450);
+
+    return () => window.clearTimeout(startTimer);
+  }, [
+    accountAccess?.status,
+    accountAccess?.user_id,
+    authUserId,
+    isAccountSecurityOpen,
+    isAddingExpense,
+    isApprovedWorkspace,
+    isBootstrapping,
+    isCreatingTripView,
+    isExchangeRatesOpen,
+    isGuidedTourOpen,
+    isJoiningTripView,
+    isSideMenuOpen,
+    isTripActive,
+    isWorkspaceLoading,
+    selectedBreakdownMemberId,
+    selectedExpenseIdForDetail,
+  ]);
 
   useEffect(() => {
     const nextTripId = activeTrip?.id ?? null;
@@ -1658,11 +1781,11 @@ function PariteApp() {
               currentMember={currentMember}
               accountEmail={authUser?.email ?? null}
               onAccountSettings={() => setIsAccountSecurityOpen(true)}
+              onReplayGuidedTour={handleReplayGuidedTour}
               workspaces={workspaces}
               currentMemberId={currentMember?.id ?? null}
               onClose={() => setIsSideMenuOpen(false)}
               onSwitchWorkspace={handleSwitchWorkspace}
-              onShowTripSelection={handleShowTripSelection}
               onCreateTrip={handleStartCreateTrip}
               onJoinTrip={handleStartJoinTrip}
               onAdminTools={() => {
@@ -2090,6 +2213,13 @@ function PariteApp() {
             showAdminBadge={currentMember.role === 'admin' || accountAccess?.role === 'admin'}
           />
         )}
+
+        <GuidedTour
+          isOpen={isGuidedTourOpen}
+          onComplete={handleCompleteGuidedTour}
+          onSkip={handleSkipGuidedTour}
+          onStepChange={prepareGuidedTourStep}
+        />
       </div>
     </div>
   );
