@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Save, X } from 'lucide-react';
 import { Currency, ExchangeRate, Member, SUPPORTED_CURRENCIES, Trip } from '../types';
-import { isDecimalInputValue, parsePositiveDecimal } from '../lib/decimalInput';
+import { isDecimalInputValue, normalizeDecimalInput, parsePositiveDecimal } from '../lib/decimalInput';
 import { getTripExchangeRate } from '../lib/exchangeRates';
 
 interface ExchangeRatesSheetProps {
@@ -219,12 +219,15 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
                         inputMode="decimal"
                         disabled={savingPair === fromCurrency}
                         value={rateInputs[fromCurrency] ?? ''}
-                        onChange={event => setRateInputs(prev => ({
-                          ...prev,
-                          [fromCurrency]: isDecimalInputValue(event.target.value)
-                            ? event.target.value
-                            : prev[fromCurrency] ?? '',
-                        }))}
+                        onChange={event => {
+                          const nextValue = normalizeDecimalInput(event.target.value);
+                          setRateInputs(prev => ({
+                            ...prev,
+                            [fromCurrency]: isDecimalInputValue(nextValue)
+                              ? nextValue
+                              : prev[fromCurrency] ?? '',
+                          }));
+                        }}
                         placeholder="Manual rate"
                         className="min-w-0 flex-1 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 font-mono text-sm text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none disabled:opacity-60"
                       />
