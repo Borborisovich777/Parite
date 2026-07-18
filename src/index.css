@@ -242,6 +242,59 @@ body {
   }
 }
 
+@keyframes guided-tour-pointer-click {
+  0%, 22%, 100% {
+    transform: translate3d(8px, 10px, 0) scale(1);
+  }
+  38%, 52% {
+    transform: translate3d(0, 0, 0) scale(0.88);
+  }
+  68% {
+    transform: translate3d(3px, 4px, 0) scale(1);
+  }
+}
+
+@keyframes guided-tour-tap-ring {
+  0%, 28% {
+    opacity: 0;
+    transform: scale(0.42);
+  }
+  42% {
+    opacity: 0.95;
+    transform: scale(0.58);
+  }
+  72%, 100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+@keyframes guided-tour-mini-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(79, 168, 137, 0.42);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(79, 168, 137, 0);
+  }
+}
+
+.guided-tour-dialog {
+  animation: parite-slide-up 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.guided-tour-pointer {
+  transform-origin: 4px 4px;
+  animation: guided-tour-pointer-click 1.8s ease-in-out infinite;
+}
+
+.guided-tour-tap {
+  animation: guided-tour-tap-ring 1.8s ease-out infinite;
+}
+
+.guided-tour-mini-tap {
+  animation: guided-tour-mini-pulse 1.5s ease-in-out infinite;
+}
+
 .animate-fade-in {
   animation: parite-fade-in 220ms ease-out;
 }
@@ -261,6 +314,14 @@ body {
 
   .parite-shell * {
     scroll-behavior: auto !important;
+  }
+
+  .guided-tour-dialog,
+  .guided-tour-pointer,
+  .guided-tour-tap,
+  .guided-tour-mini-tap {
+    animation: none !important;
+    transition: none !important;
   }
 }
 
