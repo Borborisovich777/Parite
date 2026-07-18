@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { AppHeader } from './AppHeader';
 import { AccountSecuritySheet } from './AccountSecuritySheet';
 import { BalancesTab } from './BalancesTab';
@@ -7,6 +7,7 @@ import { ExpensesTab } from './ExpensesTab';
 import { MemberBreakdownSheet } from './MemberBreakdownSheet';
 import { MembersTab } from './MembersTab';
 import { SideMenu } from './SideMenu';
+import { GuidedTour, type GuidedTourStep } from './GuidedTour';
 import { createUiPreviewWorkspace } from '../lib/uiPreviewData';
 import type { AccountAccess, Expense, ExpenseSplit, Member, Settlement } from '../types';
 
@@ -23,6 +24,9 @@ export const UiPreview: React.FC = () => {
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isAccountSecurityOpen, setIsAccountSecurityOpen] = useState(false);
+  const [isGuidedTourOpen, setIsGuidedTourOpen] = useState(() => (
+    new URLSearchParams(window.location.search).get('tour') === '1'
+  ));
   const [previewEmail] = useState('mira@example.com');
   const [previewPendingEmail, setPreviewPendingEmail] = useState<string | null>(null);
   const [selectedBreakdownMemberId, setSelectedBreakdownMemberId] = useState<string | null>(null);
@@ -48,6 +52,28 @@ export const UiPreview: React.FC = () => {
     setIsAddingExpense(false);
     setSelectedBreakdownMemberId(null);
   };
+
+  const prepareGuidedTourStep = useCallback((step: GuidedTourStep) => {
+    setSelectedExpenseId(null);
+    setSelectedBreakdownMemberId(null);
+    setIsAddingExpense(false);
+    setIsAccountSecurityOpen(false);
+    setIsSideMenuOpen(step.id === 'groups');
+
+    if (step.id === 'settlements') {
+      setActiveTab('balances');
+    } else if (step.id === 'members') {
+      setActiveTab('members');
+    } else {
+      setActiveTab('expenses');
+    }
+  }, []);
+
+  const closeGuidedTour = useCallback(() => {
+    setIsGuidedTourOpen(false);
+    setIsSideMenuOpen(false);
+    setActiveTab('expenses');
+  }, []);
 
   const handleCreateExpense: ExpenseTabProps['onCreateExpense'] = async (
     title,
@@ -238,23 +264,77 @@ export const UiPreview: React.FC = () => {
           currentMember={currentMember}
           accountEmail={previewEmail}
           onAccountSettings={() => setIsAccountSecurityOpen(true)}
-          workspaces={[{
-            member_id: currentMember.id,
-            trip_id: trip.id,
-            trip_name: trip.name,
-            base_currency: trip.base_currency,
-            display_name: currentMember.display_name,
-            role: currentMember.role,
-            status: currentMember.status,
-            trip_status: trip.status,
-            display_currency: currentMember.display_currency ?? null,
-            created_at: currentMember.created_at,
-            approved_at: currentMember.approved_at,
-          }]}
+          onReplayGuidedTour={() => setIsGuidedTourOpen(true)}
+          workspaces={[
+            {
+              member_id: currentMember.id,
+              trip_id: trip.id,
+              trip_name: trip.name,
+              base_currency: trip.base_currency,
+              display_name: currentMember.display_name,
+              role: currentMember.role,
+              status: currentMember.status,
+              trip_status: trip.status,
+              display_currency: currentMember.display_currency ?? null,
+              created_at: currentMember.created_at,
+              approved_at: currentMember.approved_at,
+            },
+            {
+              member_id: 'preview-member-china',
+              trip_id: 'preview-group-china',
+              trip_name: 'China Group',
+              base_currency: 'CNY',
+              display_name: 'Mira',
+              role: 'member',
+              status: 'approved',
+              trip_status: 'active',
+              display_currency: null,
+              created_at: currentMember.created_at,
+              approved_at: currentMember.approved_at,
+            },
+            {
+              member_id: 'preview-member-family',
+              trip_id: 'preview-group-family',
+              trip_name: 'Family House',
+              base_currency: 'AED',
+              display_name: 'Mira',
+              role: 'admin',
+              status: 'approved',
+              trip_status: 'active',
+              display_currency: null,
+              created_at: currentMember.created_at,
+              approved_at: currentMember.approved_at,
+            },
+            {
+              member_id: 'preview-member-almaty',
+              trip_id: 'preview-group-almaty',
+              trip_name: 'Weekend in Almaty',
+              base_currency: 'KZT',
+              display_name: 'Mira',
+              role: 'member',
+              status: 'approved',
+              trip_status: 'active',
+              display_currency: null,
+              created_at: currentMember.created_at,
+              approved_at: currentMember.approved_at,
+            },
+            {
+              member_id: 'preview-member-conference',
+              trip_id: 'preview-group-conference',
+              trip_name: 'Conference Group',
+              base_currency: 'USD',
+              display_name: 'Mira',
+              role: 'member',
+              status: 'approved',
+              trip_status: 'closed',
+              display_currency: null,
+              created_at: currentMember.created_at,
+              approved_at: currentMember.approved_at,
+            },
+          ]}
           currentMemberId={currentMember.id}
           onClose={() => setIsSideMenuOpen(false)}
           onSwitchWorkspace={async () => setIsSideMenuOpen(false)}
-          onShowTripSelection={() => setIsSideMenuOpen(false)}
           onCreateTrip={() => setIsSideMenuOpen(false)}
           onJoinTrip={() => setIsSideMenuOpen(false)}
           onAdminTools={() => {
@@ -375,6 +455,13 @@ export const UiPreview: React.FC = () => {
           onChangeTab={changeTab}
           pendingRequestsCount={previewAccountRequests.length}
           showAdminBadge
+        />
+
+        <GuidedTour
+          isOpen={isGuidedTourOpen}
+          onComplete={closeGuidedTour}
+          onSkip={closeGuidedTour}
+          onStepChange={prepareGuidedTourStep}
         />
       </div>
     </div>

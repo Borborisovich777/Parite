@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
-  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Download,
   Edit2,
+  Gamepad2,
   KeyRound,
   LogOut,
   Plus,
@@ -29,8 +31,8 @@ interface SideMenuProps {
   currentMemberId: string | null;
   onClose: () => void;
   onAccountSettings: () => void;
+  onReplayGuidedTour: () => void;
   onSwitchWorkspace: (memberId: string) => void | Promise<void>;
-  onShowTripSelection: () => void;
   onCreateTrip: () => void;
   onJoinTrip: () => void;
   onAdminTools: () => void;
@@ -58,8 +60,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   currentMemberId,
   onClose,
   onAccountSettings,
+  onReplayGuidedTour,
   onSwitchWorkspace,
-  onShowTripSelection,
   onCreateTrip,
   onJoinTrip,
   onAdminTools,
@@ -90,6 +92,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   const [displayCurrencyError, setDisplayCurrencyError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [tripNameInput, setTripNameInput] = useState(trip.name);
+  const [isGroupsExpanded, setIsGroupsExpanded] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -108,6 +111,10 @@ export const SideMenu: React.FC<SideMenuProps> = ({
     setSettingsError(null);
     setTripNameInput(trip.name);
   }, [currentMember?.display_currency, isOpen, trip.name, trip.invite_code]);
+
+  useEffect(() => {
+    if (isOpen) setIsGroupsExpanded(false);
+  }, [currentMemberId, isOpen]);
 
   if (!isOpen) return null;
 
@@ -178,6 +185,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
     : isTripClosing
       ? 'border-amber-500/20 bg-amber-50 text-amber-700'
       : 'border-[var(--color-positive)]/20 bg-[var(--color-positive-soft)] text-[var(--color-positive)]';
+
+  const orderedWorkspaces = [
+    ...workspaces.filter(workspace => workspace.member_id === currentMemberId),
+    ...workspaces.filter(workspace => workspace.member_id !== currentMemberId),
+  ];
+  const visibleWorkspaces = isGroupsExpanded ? orderedWorkspaces : orderedWorkspaces.slice(0, 3);
+  const hiddenGroupCount = Math.max(orderedWorkspaces.length - 3, 0);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-start md:p-6">
@@ -251,6 +265,23 @@ export const SideMenu: React.FC<SideMenuProps> = ({
               </span>
               <span className="text-[10px] font-bold text-[var(--color-positive)]">Manage</span>
             </button>
+            {isApprovedMember && isTripActive && (
+              <button
+                type="button"
+                id="btn-menu-guided-tour"
+                onClick={() => {
+                  onClose();
+                  onReplayGuidedTour();
+                }}
+                className="mt-2 flex min-h-11 w-full cursor-pointer items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-2.5 text-left text-sm font-semibold text-[var(--color-text)] hover:border-[var(--color-positive)]/30"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Gamepad2 className="h-4 w-4 text-[var(--color-positive)]" />
+                  Guided tour
+                </span>
+                <span className="text-[10px] font-bold text-[var(--color-positive)]">Replay</span>
+              </button>
+            )}
           </section>
 
           {isApprovedMember && (
@@ -454,65 +485,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
             </div>
           </section>
 
-          {isApprovedMember && (
-            <section className="parite-card p-4">
-              <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
-                Export
-              </p>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  id="btn-export-expenses-csv"
-                  onClick={onExportExpensesCsv}
-                  disabled={exportBusy !== null}
-                  className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
-                >
-                  <Download className="h-4 w-4 text-[var(--color-positive)]" />
-                  {exportBusy === 'expenses' ? 'Exporting expenses...' : 'Export expenses CSV'}
-                </button>
-                <button
-                  type="button"
-                  id="btn-export-balances-csv"
-                  onClick={onExportBalancesCsv}
-                  disabled={exportBusy !== null}
-                  className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
-                >
-                  <Download className="h-4 w-4 text-[var(--color-positive)]" />
-                  {exportBusy === 'balances' ? 'Exporting balances...' : 'Export balances CSV'}
-                </button>
-                <button
-                  type="button"
-                  id="btn-export-settlements-csv"
-                  onClick={onExportSettlementsCsv}
-                  disabled={exportBusy !== null}
-                  className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
-                >
-                  <Download className="h-4 w-4 text-[var(--color-positive)]" />
-                  {exportBusy === 'settlements' ? 'Exporting settlements...' : 'Export settlements CSV'}
-                </button>
-              </div>
-            </section>
-          )}
-
           <section className="parite-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
-                Groups
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  onShowTripSelection();
-                  onClose();
-                }}
-                className="text-[10px] font-bold text-[var(--color-positive)] cursor-pointer"
-              >
-                Switch group
-              </button>
-            </div>
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
+              Groups
+            </p>
 
-            <div className="flex flex-col gap-2">
-              {workspaces.map(workspace => {
+            <div id="side-menu-group-list" className="flex flex-col gap-2">
+              {visibleWorkspaces.map(workspace => {
                 const isActive = workspace.member_id === currentMemberId;
                 return (
                   <button
@@ -554,47 +533,99 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 );
               })}
             </div>
+
+            {hiddenGroupCount > 0 && (
+              <button
+                type="button"
+                id="btn-menu-toggle-groups"
+                aria-expanded={isGroupsExpanded}
+                aria-controls="side-menu-group-list"
+                onClick={() => setIsGroupsExpanded(current => !current)}
+                className="mt-2 flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl text-xs font-bold text-[var(--color-positive)] hover:bg-[var(--color-positive-soft)]"
+              >
+                {isGroupsExpanded ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" />
+                    Show fewer groups
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" />
+                    Show {hiddenGroupCount} more {hiddenGroupCount === 1 ? 'group' : 'groups'}
+                  </>
+                )}
+              </button>
+            )}
+
+            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[var(--color-border)] pt-3">
+              <button
+                type="button"
+                id="btn-menu-create-trip"
+                onClick={() => {
+                  onCreateTrip();
+                  onClose();
+                }}
+                className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-2 py-2.5 text-xs font-bold text-[var(--color-text)] hover:border-[var(--color-positive)]/30"
+              >
+                <Plus className="h-4 w-4 shrink-0 text-[var(--color-positive)]" />
+                Create group
+              </button>
+
+              <button
+                type="button"
+                id="btn-menu-join-trip"
+                onClick={() => {
+                  onJoinTrip();
+                  onClose();
+                }}
+                className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-2 py-2.5 text-xs font-bold text-[var(--color-text)] hover:border-[var(--color-positive)]/30"
+              >
+                <UserPlus className="h-4 w-4 shrink-0 text-[var(--color-positive)]" />
+                Join group
+              </button>
+            </div>
           </section>
 
           <section className="flex flex-col gap-2">
-            <button
-              type="button"
-              id="btn-menu-create-trip"
-              onClick={() => {
-                onCreateTrip();
-                onClose();
-              }}
-              className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm shadow-[var(--shadow-card)] cursor-pointer hover:border-[var(--color-positive)]/30"
-            >
-              <Plus className="h-4 w-4 text-[var(--color-positive)]" />
-              Create group
-            </button>
-
-            <button
-              type="button"
-              id="btn-menu-join-trip"
-              onClick={() => {
-                onJoinTrip();
-                onClose();
-              }}
-              className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm shadow-[var(--shadow-card)] cursor-pointer hover:border-[var(--color-positive)]/30"
-            >
-              <UserPlus className="h-4 w-4 text-[var(--color-positive)]" />
-              Join group
-            </button>
-
-            <button
-              type="button"
-              id="btn-app-switch-trip"
-              onClick={() => {
-                onShowTripSelection();
-                onClose();
-              }}
-              className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-white text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm shadow-[var(--shadow-card)] cursor-pointer hover:border-[var(--color-positive)]/30"
-            >
-              <ArrowLeft className="h-4 w-4 text-[var(--color-positive)]" />
-              Switch group
-            </button>
+            {isApprovedMember && (
+              <section className="parite-card p-4">
+                <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
+                  Export
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    id="btn-export-expenses-csv"
+                    onClick={onExportExpensesCsv}
+                    disabled={exportBusy !== null}
+                    className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
+                  >
+                    <Download className="h-4 w-4 text-[var(--color-positive)]" />
+                    {exportBusy === 'expenses' ? 'Exporting expenses...' : 'Export expenses CSV'}
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-export-balances-csv"
+                    onClick={onExportBalancesCsv}
+                    disabled={exportBusy !== null}
+                    className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
+                  >
+                    <Download className="h-4 w-4 text-[var(--color-positive)]" />
+                    {exportBusy === 'balances' ? 'Exporting balances...' : 'Export balances CSV'}
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-export-settlements-csv"
+                    onClick={onExportSettlementsCsv}
+                    disabled={exportBusy !== null}
+                    className="w-full min-h-11 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text)] px-3 py-3 flex items-center gap-2 font-semibold text-sm cursor-pointer hover:border-[var(--color-positive)]/30 disabled:opacity-60"
+                  >
+                    <Download className="h-4 w-4 text-[var(--color-positive)]" />
+                    {exportBusy === 'settlements' ? 'Exporting settlements...' : 'Export settlements CSV'}
+                  </button>
+                </div>
+              </section>
+            )}
 
             <button
               type="button"
