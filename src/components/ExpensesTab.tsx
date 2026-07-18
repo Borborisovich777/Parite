@@ -1,11 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from '../types';
 import {
   calculateConvertedAmount,
   calculateOpenMemberBalances,
   calculateSmartCustomSplitsWithFee,
 } from '../lib/calculations';
-import { isDecimalInputValue, isMoneyInputValue, parsePositiveDecimal } from '../lib/decimalInput';
+import {
+  isDecimalInputValue,
+  isMoneyInputValue,
+  normalizeDecimalInput,
+  parsePositiveDecimal,
+  parsePositiveMoney,
+} from '../lib/decimalInput';
 import { formatDisplayMoney, getMemberDisplayCurrency, getTripExchangeRate } from '../lib/exchangeRates';
 import {
   AlertCircle,
@@ -161,6 +168,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const submitSourceRef = useRef<string | null>(null);
+  const formScrollRef = useRef<HTMLDivElement>(null);
 
   const setBlockingError = (message: string) => {
     setFormError(message);
@@ -197,8 +205,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const roundMoney = (value: number) => Math.round(value * 100) / 100;
-  const subtotalValue = parseFloat(formAmount);
-  const hasValidAmount = Number.isFinite(subtotalValue) && subtotalValue > 0;
+  const subtotalValue = parsePositiveMoney(formAmount) ?? Number.NaN;
+  const hasValidAmount = Number.isFinite(subtotalValue);
   const feePercentValue = isServiceFeeEnabled && feePercentInput.trim() !== ''
     ? Number(feePercentInput)
     : 0;
@@ -508,8 +516,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       return false;
     }
 
-    const amount = parseFloat(formAmount);
-    if (Number.isNaN(amount) || amount <= 0) {
+    const amount = parsePositiveMoney(formAmount);
+    if (amount === null) {
       setValidationError(isServiceFeeEnabled ? 'Subtotal must be greater than zero' : 'Amount must be greater than zero');
       return false;
     }
@@ -697,6 +705,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const isFormOpen = isAddingExpense || Boolean(editingExpense);
+
+  useLayoutEffect(() => {
+    if (!isFormOpen) return;
+    formScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [editingExpense?.id, formStep, isFormOpen]);
   const readOnlyMessage = (trip.status ?? 'active') === 'closed'
     ? 'This group is closed and read-only. Expenses can still be viewed, but they cannot be added, edited, or deleted.'
     : 'This group is being closed. Cancel the close request before changing expenses.';
@@ -729,12 +742,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   return (
     <div className={`relative flex h-full min-h-0 flex-col overflow-hidden ${isFormOpen ? '' : 'animate-fade-in'}`}>
-      {isFormOpen ? (
+      {isFormOpen ? createPortal(
         <form
           onSubmit={handleFormSubmit}
-          className="fixed inset-0 z-[70] mx-auto flex h-[100dvh] w-full max-w-md flex-col bg-[#f5f7f4] md:absolute md:z-50 md:h-full md:max-w-none"
+          className="parite-shell fixed inset-0 z-[70] mx-auto flex h-[100dvh] min-h-0 w-full max-w-md flex-col bg-[#f5f7f4] font-sans md:inset-6 md:h-auto md:max-w-6xl md:overflow-hidden md:rounded-[36px] md:border md:border-black/10 md:shadow-2xl"
         >
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-black/10 bg-white/95 px-4 py-3 backdrop-blur md:px-6 lg:px-8">
+          <div
+            className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-black/10 bg-white/95 px-4 pb-3 pt-3 backdrop-blur md:px-6 lg:px-8"
+            style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+          >
             <button
               type="button"
               onClick={closeForm}
@@ -754,7 +770,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             <div className="w-10" />
           </div>
 
-          <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6 lg:px-8">
+          <div
+            ref={formScrollRef}
+            className="no-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto px-4 py-5 scroll-pb-6 md:px-6 lg:px-8"
+          >
             {formError && (
               <div className="mx-auto mb-4 max-w-4xl bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -777,7 +796,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         id="input-expense-amount"
                         value={formAmount}
                         onChange={event => {
-                          const nextValue = event.target.value;
+                          const nextValue = normalizeDecimalInput(event.target.value);
                           if (isMoneyInputValue(nextValue)) setFormAmount(nextValue);
                         }}
                         placeholder="0.00"
@@ -919,7 +938,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             inputMode="decimal"
                             value={feePercentInput}
                             onChange={event => {
-                              const nextValue = event.target.value;
+                              const nextValue = normalizeDecimalInput(event.target.value);
                               if (isDecimalInputValue(nextValue)) setFeePercentInput(nextValue);
                             }}
                             placeholder="10"
@@ -1185,7 +1204,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             id="input-exchange-rate"
                             value={customExchangeRateInput}
                             onChange={event => {
-                              const nextValue = event.target.value;
+                              const nextValue = normalizeDecimalInput(event.target.value);
                               if (isDecimalInputValue(nextValue)) {
                                 setCustomExchangeRateInput(nextValue);
                               }
@@ -1453,7 +1472,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                                     id={`input-custom-split-${participantId}`}
                                     value={manualValue}
                                     onChange={event => {
-                                      const nextValue = event.target.value;
+                                      const nextValue = normalizeDecimalInput(event.target.value);
                                       if (isMoneyInputValue(nextValue)) {
                                         setFormCustomSplits(prev => ({
                                           ...prev,
@@ -1572,7 +1591,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </>
             )}
           </div>
-        </form>
+        </form>,
+        document.body
       ) : (
         <>
           <div className="shrink-0 px-4 pb-3 pt-4 md:px-6 lg:px-8">
