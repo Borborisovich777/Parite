@@ -728,7 +728,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
 
   return (
-    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden pb-20 md:pb-0 ${isFormOpen ? '' : 'animate-fade-in'}`}>
+    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden ${isFormOpen ? '' : 'animate-fade-in'}`}>
       {isFormOpen ? (
         <form
           onSubmit={handleFormSubmit}
@@ -1677,7 +1677,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </button>
             </div>
 
-            <div className="no-scrollbar flex-1 overflow-y-auto pb-16 md:pb-8">
+            <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto pb-4 md:pb-8">
               {filteredExpenses.length === 0 ? (
                 <div className="m-4 rounded-3xl border border-dashed border-black/10 bg-[#fafbf9] px-4 py-12 text-center">
                   <Search className="mx-auto mb-3 h-9 w-9 text-slate-300" />
