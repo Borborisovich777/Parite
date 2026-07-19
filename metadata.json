@@ -1,5 +1,5 @@
 {
   "name": "Parité",
-  "description": "A mobile-first group expense splitting app with multi-currency support (AED, CNY, KZT, and USD).",
+  "description": "Private group expenses, clear balances, and settlements across AED, CNY, KZT, and USD.",
   "requestFramePermissions": []
 }
