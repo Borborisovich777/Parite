@@ -1,12 +1,12 @@
 {
   "name": "Parité",
   "short_name": "Parité",
-  "description": "A mobile-first group expense splitting app with multi-currency support.",
+  "description": "Private group expenses, clear balances, and settlements across currencies.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f1de",
-  "theme_color": "#81b29a",
+  "background_color": "#f6f8f7",
+  "theme_color": "#4fa889",
   "icons": [
     {
       "src": "/apple-touch-icon.png",
