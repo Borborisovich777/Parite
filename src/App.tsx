@@ -13,6 +13,8 @@ import {
 } from './components/AccountSecuritySheet';
 import { LandingPage } from './components/LandingPage';
 import { UiPreview } from './components/UiPreview';
+import { PromoPreview, type PromoFormat } from './components/PromoPreview';
+import type { PromoScreen } from './components/LaunchPromoVisual';
 import { GuidedTour, type GuidedTourStep } from './components/GuidedTour';
 import { AccountAccess, Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
@@ -2226,8 +2228,24 @@ function PariteApp() {
 }
 
 export default function App() {
-  const isUiPreview = import.meta.env.DEV
-    && new URLSearchParams(window.location.search).get('preview') === 'ui';
+  const searchParams = new URLSearchParams(window.location.search);
+  const preview = searchParams.get('preview');
+  const isUiPreview = import.meta.env.DEV && preview === 'ui';
+
+  if (import.meta.env.DEV && preview === 'promo') {
+    const requestedFormat = searchParams.get('format');
+    const requestedScreen = searchParams.get('screen');
+    const formats: PromoFormat[] = ['landscape', 'feed', 'square', 'story'];
+    const screens: PromoScreen[] = ['expenses', 'balances', 'members'];
+    const format = formats.includes(requestedFormat as PromoFormat)
+      ? requestedFormat as PromoFormat
+      : 'feed';
+    const screen = screens.includes(requestedScreen as PromoScreen)
+      ? requestedScreen as PromoScreen
+      : 'expenses';
+
+    return <PromoPreview format={format} screen={screen} />;
+  }
 
   return isUiPreview ? <UiPreview /> : <PariteApp />;
 }
