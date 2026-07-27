@@ -190,9 +190,17 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
         </section>
 
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1">
+          <div
+            className="grid grid-cols-2 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1"
+            role="tablist"
+            aria-label="Settlement views"
+          >
         <button
           type="button"
+          id="btn-settlement-recommendations-tab"
+          role="tab"
+          aria-selected={activeSubTab === 'recommendations'}
+          aria-controls="settlement-recommendations-panel"
           onClick={() => setActiveSubTab('recommendations')}
           className={`min-h-11 rounded-xl px-2 text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'recommendations'
@@ -210,6 +218,9 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
         <button
           type="button"
           id="btn-settlement-history-tab"
+          role="tab"
+          aria-selected={activeSubTab === 'history'}
+          aria-controls="settlement-history-panel"
           onClick={() => setActiveSubTab('history')}
           className={`min-h-11 rounded-xl px-2 text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'history'
@@ -227,7 +238,12 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           </div>
 
           {activeSubTab === 'recommendations' ? (
-        <section className="flex flex-col gap-2">
+        <section
+          id="settlement-recommendations-panel"
+          role="tabpanel"
+          aria-labelledby="btn-settlement-recommendations-tab"
+          className="flex flex-col gap-2"
+        >
           {recommendations.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--color-positive)]/20 bg-[var(--color-positive-soft)] px-4 py-12 text-center">
               <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/80 text-[var(--color-positive)] shadow-sm">
@@ -335,7 +351,12 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
           )}
         </section>
       ) : (
-        <section className="flex flex-col gap-2">
+        <section
+          id="settlement-history-panel"
+          role="tabpanel"
+          aria-labelledby="btn-settlement-history-tab"
+          className="flex flex-col gap-2"
+        >
           {settlementHistoryList.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--color-border)] bg-white px-4 py-12 text-center">
               <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-surface-soft)] text-[var(--color-muted)]">

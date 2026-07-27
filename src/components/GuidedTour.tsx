@@ -46,11 +46,11 @@ const GUIDED_TOUR_STEPS: readonly GuidedTourStep[] = [
   },
   {
     id: 'menu',
-    eyebrow: 'Your command menu',
-    title: 'Start from your avatar',
-    description: 'Tap your avatar whenever you need account settings, group tools, exports, or the guided tour again.',
-    targetLabel: 'Menu button',
-    selectors: ['#btn-open-side-menu'],
+    eyebrow: 'Your command center',
+    title: 'Start from your account',
+    description: 'Open your account area for personal settings, group tools, exports, or the guided tour.',
+    targetLabel: 'Account controls',
+    selectors: ['#btn-open-side-menu', '#btn-desktop-account-settings'],
   },
   {
     id: 'groups',
@@ -58,7 +58,12 @@ const GUIDED_TOUR_STEPS: readonly GuidedTourStep[] = [
     title: 'All your groups live here',
     description: 'Choose a group to switch context. Longer lists stay compact until you ask to see more.',
     targetLabel: 'Groups list',
-    selectors: ['#side-menu-group-list > button:first-child', '#side-menu-group-list'],
+    selectors: [
+      '#side-menu-group-list > button:first-child',
+      '#side-menu-group-list',
+      '#desktop-workspace-list > button:first-child',
+      '#desktop-workspace-list',
+    ],
     scrollBlock: 'end',
   },
   {
@@ -83,7 +88,7 @@ const GUIDED_TOUR_STEPS: readonly GuidedTourStep[] = [
     title: 'Open Balances',
     description: 'Balances turns every shared expense into a clear summary of who should pay whom.',
     targetLabel: 'Balances navigation button',
-    selectors: ['#nav-tab-balances', '#nav-tab-balances-desktop'],
+    selectors: ['#nav-tab-balances', '#nav-tab-balances-desktop', '#nav-tab-balances-rail'],
   },
   {
     id: 'settlements',
@@ -99,7 +104,7 @@ const GUIDED_TOUR_STEPS: readonly GuidedTourStep[] = [
     title: 'Meet the Members section',
     description: 'Review members, requests, roles, avatars, and each person’s spending breakdown from one place.',
     targetLabel: 'Members navigation button',
-    selectors: ['#nav-tab-members', '#nav-tab-members-desktop'],
+    selectors: ['#nav-tab-members', '#nav-tab-members-desktop', '#nav-tab-members-rail'],
   },
   {
     id: 'finish',

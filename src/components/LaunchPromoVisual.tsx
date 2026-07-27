@@ -34,11 +34,11 @@ const promoScreens = {
     label: 'Private groups',
     eyebrow: 'Invite with confidence',
     title: 'Keep access in the hands of your group.',
-    body: 'Share an invite code, approve requests, and manage the people inside each private group.',
+    body: 'Share an invite link, QR, or manual code, approve requests, and manage the people inside each private group.',
     image: '/promo/product-members.png',
     alt: 'Parité members view showing a private invite code and group member controls.',
     icon: Users,
-    proof: 'Invite code · Admin approval',
+    proof: 'Link, QR, or code · Admin approval',
   },
 } as const;
 
@@ -106,7 +106,7 @@ export const LaunchPromoVisual: React.FC<LaunchPromoVisualProps> = ({
         </span>
         <span>
           <small>Private by design</small>
-          <strong>Invite code + approval</strong>
+          <strong>Invite link + approval</strong>
         </span>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, Receipt, Scale, Wallet, X } from 'lucide-react';
 import { ExchangeRate, Expense, ExpenseSplit, Member, Settlement, Trip } from '../types';
 import { calculateOpenMemberBalances } from '../lib/calculations';
@@ -26,6 +26,15 @@ import {
 
 type ChartMode = 'paid' | 'share';
 type ExpenseListMode = 'paid' | 'shared';
+
+const focusableSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 const CATEGORY_CHART_VISUAL_IDS = {
   'food-drink': 'groceries',
@@ -62,11 +71,21 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
   settlements,
   exchangeRates,
 }) => {
+  const headingId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const [chartMode, setChartMode] = useState<ChartMode>('paid');
   const [expenseListMode, setExpenseListMode] = useState<ExpenseListMode>('paid');
   const [selectedCategoryId, setSelectedCategoryId] = useState<ExpenseVisualCategoryId | null>(null);
   const baseCurrency = trip.base_currency;
   const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const memberMetrics = useMemo(() => {
     if (!member) return null;
@@ -138,6 +157,97 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
 
   useEffect(() => {
     setSelectedCategoryId(null);
+  }, [isOpen, member?.id]);
+
+  useEffect(() => {
+    if (!isOpen || !member) return;
+
+    previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      const focusableCandidates = Array.from(
+        dialog.querySelectorAll(focusableSelector),
+      ) as HTMLElement[];
+      const focusableElements = focusableCandidates.filter(element => (
+        !element.hasAttribute('disabled')
+        && element.getAttribute('aria-hidden') !== 'true'
+        && element.getClientRects().length > 0
+        && window.getComputedStyle(element).visibility !== 'hidden'
+      ));
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey && (activeElement === firstElement || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && (activeElement === lastElement || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.body.style.overflow = previousBodyOverflow;
+
+      const isVisibleFocusTarget = (element: HTMLElement | null): element is HTMLElement => Boolean(
+        element
+        && element !== document.body
+        && element.isConnected
+        && element.getClientRects().length > 0
+        && window.getComputedStyle(element).visibility !== 'hidden',
+      );
+      const previousFocus = previouslyFocusedElementRef.current;
+      previouslyFocusedElementRef.current = null;
+
+      if (isVisibleFocusTarget(previousFocus)) {
+        previousFocus.focus();
+        return;
+      }
+
+      const fallbackFocus = [
+        document.getElementById(`balance-row-${member.id}`),
+        document.getElementById(`btn-view-spending-${member.id}`),
+        document.getElementById('nav-tab-balances'),
+        document.getElementById('nav-tab-balances-desktop'),
+        document.getElementById('nav-tab-balances-rail'),
+        document.getElementById('nav-tab-members'),
+        document.getElementById('nav-tab-members-desktop'),
+        document.getElementById('nav-tab-members-rail'),
+      ].find(isVisibleFocusTarget);
+      fallbackFocus?.focus();
+    };
   }, [isOpen, member?.id]);
 
   if (!isOpen || !member || !memberMetrics) return null;
@@ -268,12 +378,21 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
     <div className="fixed inset-0 z-[60] flex items-end justify-center md:items-center md:p-6">
       <button
         type="button"
+        tabIndex={-1}
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] cursor-default"
         aria-label="Close member breakdown"
         onClick={onClose}
       />
 
-      <section className="relative z-10 flex max-h-[92dvh] min-h-0 w-full max-w-md flex-col overflow-hidden rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-4xl md:rounded-[28px]">
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        className="relative z-10 flex max-h-[92dvh] min-h-0 w-full max-w-md flex-col overflow-hidden rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-4xl md:rounded-[28px]"
+      >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <MemberAvatar member={member} size="lg" />
@@ -281,18 +400,22 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
               <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
                 Member breakdown
               </p>
-              <h2 className="truncate text-lg font-bold text-white font-display">
+              <h2 id={headingId} className="truncate text-lg font-bold text-white font-display">
                 {memberName}{member.id === currentMember.id ? ' (You)' : ''}
               </h2>
+              <p id={descriptionId} className="sr-only">
+                Review this member's balances, settlements, and expense activity.
+              </p>
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="w-10 h-10 rounded-xl bg-[#1a1d23] border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
             aria-label="Close member breakdown"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 

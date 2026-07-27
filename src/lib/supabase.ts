@@ -38,9 +38,17 @@ function throwAuthError(error: unknown): never {
   throw new Error('Authentication failed.');
 }
 
-export async function signUpWithEmail(email: string, password: string): Promise<User | null> {
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  emailRedirectTo?: string,
+): Promise<User | null> {
   const client = requireSupabase();
-  const { data, error } = await client.auth.signUp({ email, password });
+  const { data, error } = await client.auth.signUp({
+    email,
+    password,
+    options: emailRedirectTo ? { emailRedirectTo } : undefined,
+  });
   if (error) throwAuthError(error);
   return data.session?.user ?? null;
 }
