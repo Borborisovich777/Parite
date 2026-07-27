@@ -50,6 +50,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+:focus-visible {
+  outline: 3px solid var(--color-positive);
+  outline-offset: 2px;
+}
+
 /* Shared mobile-first surface utilities. */
 .header-wash {
   background: linear-gradient(145deg, var(--color-mint-wash) 0%, var(--color-blue-wash) 100%);
@@ -304,16 +309,26 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .animate-fade-in,
   .animate-slide-up,
   .animate-pulse,
   .animate-spin {
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-  }
-
-  .parite-shell * {
-    scroll-behavior: auto !important;
+    animation: none !important;
   }
 
   .guided-tour-dialog,

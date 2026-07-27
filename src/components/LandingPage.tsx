@@ -23,7 +23,7 @@ interface LandingPageProps {
 const features = [
   {
     title: 'Private by invitation',
-    body: 'Share a group code, review join requests, and keep every trip inside the circle you approve.',
+    body: 'Share an invite link, QR, or manual code, review join requests, and keep every trip inside the circle you approve.',
     icon: ShieldCheck,
   },
   {
@@ -46,7 +46,7 @@ const features = [
 const steps = [
   {
     title: 'Create or join a group',
-    body: 'Open a private shared space, or join one with an invite code and admin approval.',
+    body: 'Open a private shared space, or join with an invite link, QR, or manual code and admin approval.',
     icon: UserPlus,
   },
   {
@@ -72,7 +72,7 @@ const faqs = [
   },
   {
     question: 'Can a group stay private?',
-    answer: 'Yes. Groups use invite codes, and admins approve member access before someone joins the group.',
+    answer: 'Yes. Invite links, QR codes, and manual codes only start a request; an admin still approves access before someone joins the group.',
   },
   {
     question: 'What can we export?',
