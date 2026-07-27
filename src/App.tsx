@@ -1,10 +1,17 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BottomNav, TabType } from './components/BottomNav';
+import { OverviewTab } from './components/OverviewTab';
 import { ExpensesTab } from './components/ExpensesTab';
 import { BalancesTab } from './components/BalancesTab';
 import { MembersTab } from './components/MembersTab';
 import { AppHeader } from './components/AppHeader';
 import { SideMenu } from './components/SideMenu';
+import {
+  WorkspaceSettingsSheet,
+  type WorkspaceSettingsMode,
+} from './components/WorkspaceSettingsSheet';
+import { DesktopWorkspaceRail } from './components/DesktopWorkspaceRail';
+import { DesktopContextRail } from './components/DesktopContextRail';
 import { ExchangeRatesSheet } from './components/ExchangeRatesSheet';
 import { MemberBreakdownSheet } from './components/MemberBreakdownSheet';
 import {
@@ -12,10 +19,11 @@ import {
   type AccountEmailChangeResult,
 } from './components/AccountSecuritySheet';
 import { LandingPage } from './components/LandingPage';
-import { UiPreview } from './components/UiPreview';
+import { JoinPreview, UiPreview } from './components/UiPreview';
 import { PromoPreview, type PromoFormat } from './components/PromoPreview';
 import type { PromoScreen } from './components/LaunchPromoVisual';
 import { GuidedTour, type GuidedTourStep } from './components/GuidedTour';
+import { JoinGroupView } from './components/JoinGroupView';
 import { AccountAccess, Currency, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from './types';
 import { User } from '@supabase/supabase-js';
 import {
@@ -64,6 +72,7 @@ import {
   Clock,
   Compass,
   KeyRound,
+  Link2,
   Plus,
   UserPlus,
   UserX,
@@ -78,6 +87,13 @@ import {
   hasCompletedGuidedTour,
   saveGuidedTourCompletion,
 } from './lib/guidedTourPreferences';
+import {
+  buildInviteUrl,
+  normalizeInviteCode,
+  readInviteCodeFromSearch,
+  removeInviteFromUrl,
+} from './lib/inviteLinks';
+import { calculateOpenMemberBalances } from './lib/calculations';
 
 const LEGACY_MEMBER_ACCESS_TOKEN_KEY = 'tripbalance_member_access_token';
 const LEGACY_ACTIVE_MEMBER_ID_KEY = 'tripbalance_active_member_id';
@@ -86,8 +102,10 @@ const ACTIVE_MEMBER_ID_KEY = 'parite_active_member_id';
 function PariteApp() {
   const [workspace, setWorkspace] = useState<PhaseOneWorkspace | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('expenses');
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
+  const [isWorkspaceSettingsOpen, setIsWorkspaceSettingsOpen] = useState(false);
+  const [workspaceSettingsMode, setWorkspaceSettingsMode] = useState<WorkspaceSettingsMode>('settings');
   const [isExchangeRatesOpen, setIsExchangeRatesOpen] = useState(false);
   const [isAccountSecurityOpen, setIsAccountSecurityOpen] = useState(false);
   const [isGuidedTourOpen, setIsGuidedTourOpen] = useState(false);
@@ -116,12 +134,20 @@ function PariteApp() {
   const accountRoleRef = useRef<AccountAccess['role'] | null>(null);
   const guidedTourAutoStartedUserRef = useRef<string | null>(null);
 
-  const [inviteInput, setInviteInput] = useState('');
+  const [inviteInput, setInviteInput] = useState(() => (
+    readInviteCodeFromSearch(window.location.search) ?? ''
+  ));
   const [displayNameInput, setDisplayNameInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [isJoinSubmitting, setIsJoinSubmitting] = useState(false);
+  const [joinEntrySource, setJoinEntrySource] = useState<'link' | 'manual'>(() => (
+    readInviteCodeFromSearch(window.location.search) ? 'link' : 'manual'
+  ));
 
   const [isCreatingTripView, setIsCreatingTripView] = useState(false);
-  const [isJoiningTripView, setIsJoiningTripView] = useState(false);
+  const [isJoiningTripView, setIsJoiningTripView] = useState(() => (
+    Boolean(readInviteCodeFromSearch(window.location.search))
+  ));
   const [newTripName, setNewTripName] = useState('');
   const [newTripAdminName, setNewTripAdminName] = useState('');
   const [newTripBaseCurrency, setNewTripBaseCurrency] = useState<Currency>('CNY');
@@ -152,6 +178,11 @@ function PariteApp() {
     setActionError(getActionErrorMessage(error, fallback));
   };
 
+  const clearInviteUrl = () => {
+    const nextUrl = removeInviteFromUrl(window.location.href);
+    window.history.replaceState(window.history.state, '', nextUrl);
+  };
+
   const activeTrip = workspace?.trip ?? null;
   const authUserId = authUser?.id ?? null;
   const currentMember = workspace?.currentMember ?? null;
@@ -160,6 +191,7 @@ function PariteApp() {
   const tripSplits = workspace?.splits ?? [];
   const tripSettlements = workspace?.settlements ?? [];
   const tripExchangeRates = workspace?.exchangeRates ?? [];
+  const tripClosureVotes = workspace?.closureVotes ?? [];
   const selectedBreakdownMember = selectedBreakdownMemberId
     ? tripMembers.find(member => member.id === selectedBreakdownMemberId) ?? null
     : null;
@@ -175,9 +207,36 @@ function PariteApp() {
     + (accountAccess?.role === 'admin' ? pendingAccountAccess.length : 0);
   const tripStatus = activeTrip?.status ?? 'active';
   const isTripActive = tripStatus === 'active';
+  const closeoutBlockers = useMemo(() => {
+    if (!activeTrip || tripStatus === 'closed') return [];
+
+    const approvedMembers = tripMembers.filter(member => member.status === 'approved');
+    const openBalances = calculateOpenMemberBalances(
+      tripExpenses,
+      tripSplits,
+      tripSettlements,
+      approvedMembers,
+    );
+
+    return openBalances.some(balance => Math.abs(balance.net_balance) > 0.01)
+      ? ['Open balances remain. Complete the recommended transfers before starting closeout.']
+      : [];
+  }, [
+    activeTrip,
+    tripStatus,
+    tripExpenses,
+    tripMembers,
+    tripSettlements,
+    tripSplits,
+  ]);
+  const openWorkspaceSettings = useCallback((mode: WorkspaceSettingsMode) => {
+    setWorkspaceSettingsMode(mode);
+    setIsWorkspaceSettingsOpen(true);
+  }, []);
 
   useEffect(() => {
     setIsAccountSecurityOpen(false);
+    setIsWorkspaceSettingsOpen(false);
   }, [authUserId]);
 
   useEffect(() => {
@@ -195,7 +254,10 @@ function PariteApp() {
     setIsAddingExpense(false);
     setIsExchangeRatesOpen(false);
     setIsAccountSecurityOpen(false);
-    setIsSideMenuOpen(step.id === 'groups');
+    setIsWorkspaceSettingsOpen(false);
+    setIsSideMenuOpen(
+      step.id === 'groups' && !window.matchMedia('(min-width: 1024px)').matches,
+    );
 
     if (step.id === 'settlements') {
       setActiveTab('balances');
@@ -224,7 +286,8 @@ function PariteApp() {
     setIsGuidedTourOpen(false);
     setGuidedTourUserId(null);
     setIsSideMenuOpen(false);
-    setActiveTab('expenses');
+    setIsWorkspaceSettingsOpen(false);
+    setActiveTab('overview');
   }, [guidedTourUserId]);
 
   const handleCompleteGuidedTour = useCallback(
@@ -243,6 +306,7 @@ function PariteApp() {
       && accountAccess.status === 'approved',
     );
     const hasCompetingSurface = isSideMenuOpen
+      || isWorkspaceSettingsOpen
       || isExchangeRatesOpen
       || isAccountSecurityOpen
       || isAddingExpense
@@ -289,6 +353,7 @@ function PariteApp() {
     isGuidedTourOpen,
     isJoiningTripView,
     isSideMenuOpen,
+    isWorkspaceSettingsOpen,
     isTripActive,
     isWorkspaceLoading,
     selectedBreakdownMemberId,
@@ -406,16 +471,6 @@ function PariteApp() {
         clearAccessToken();
       }
       return null;
-    }
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const inviteParam = params.get('invite');
-    if (inviteParam) {
-      setInviteInput(inviteParam.toUpperCase());
-      setIsCreatingTripView(false);
-      setIsJoiningTripView(true);
     }
   }, []);
 
@@ -565,6 +620,14 @@ function PariteApp() {
     let cancelled = false;
 
     async function restoreAccountWorkspace() {
+      if (isJoiningTripView) {
+        await refreshWorkspaces();
+        if (cancelled) return;
+        setWorkspace(null);
+        setAppError(null);
+        return;
+      }
+
       const claimedWorkspace = await claimLegacyAccessIfPresent();
       if (cancelled) return;
       await refreshWorkspaces();
@@ -585,7 +648,15 @@ function PariteApp() {
     return () => {
       cancelled = true;
     };
-  }, [authUserId, isApprovedAccount, isBootstrapping, claimLegacyAccessIfPresent, loadAuthenticatedWorkspace, refreshWorkspaces]);
+  }, [
+    authUserId,
+    isApprovedAccount,
+    isBootstrapping,
+    isJoiningTripView,
+    claimLegacyAccessIfPresent,
+    loadAuthenticatedWorkspace,
+    refreshWorkspaces,
+  ]);
 
   const handleAuthSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -605,7 +676,13 @@ function PariteApp() {
     setIsAuthSubmitting(true);
     try {
       const user = authMode === 'signup'
-        ? await signUpWithEmail(authEmail.trim(), authPassword)
+        ? await signUpWithEmail(
+          authEmail.trim(),
+          authPassword,
+          joinEntrySource === 'link' && inviteInput
+            ? buildInviteUrl(inviteInput, window.location.href)
+            : undefined,
+        )
         : await signInWithEmail(authEmail.trim(), authPassword);
 
       if (user) {
@@ -637,9 +714,10 @@ function PariteApp() {
       setWorkspace(null);
       setWorkspaces([]);
       setIsSideMenuOpen(false);
+      setIsWorkspaceSettingsOpen(false);
       setIsAccountSecurityOpen(false);
       clearActiveMemberId();
-      setActiveTab('expenses');
+      setActiveTab('overview');
     } catch (error) {
       console.error(error);
       setActionErrorFromUnknown(error, 'Could not log out.');
@@ -873,7 +951,7 @@ function PariteApp() {
       setNewTripAdminName('');
       setIsCreatingTripView(false);
       setIsJoiningTripView(false);
-      setActiveTab('expenses');
+      setActiveTab('overview');
     } catch (error) {
       console.error(error);
       setCreateTripError(error instanceof Error ? error.message : 'Could not create group.');
@@ -882,10 +960,13 @@ function PariteApp() {
 
   const handleJoinTripSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (isJoinSubmitting) return;
+
     setJoinError(null);
     setActionError(null);
 
-    if (!inviteInput.trim()) {
+    const normalizedInviteCode = normalizeInviteCode(inviteInput);
+    if (!normalizedInviteCode) {
       setJoinError('Please provide an invite code');
       return;
     }
@@ -894,17 +975,29 @@ function PariteApp() {
       return;
     }
 
+    setInviteInput(normalizedInviteCode);
+    setIsJoinSubmitting(true);
     try {
-      const nextWorkspace = await requestJoinByInvite(inviteInput.trim(), displayNameInput.trim());
+      const nextWorkspace = await requestJoinByInvite(normalizedInviteCode, displayNameInput.trim());
       applyWorkspace(nextWorkspace);
       await refreshWorkspaces();
+      clearInviteUrl();
+      setInviteInput('');
       setDisplayNameInput('');
+      setJoinEntrySource('manual');
       setIsJoiningTripView(false);
       setIsCreatingTripView(false);
-      setActiveTab('expenses');
+      setActiveTab('overview');
     } catch (error) {
       console.error(error);
-      setJoinError(error instanceof Error ? error.message : 'Could not request access.');
+      const message = error instanceof Error ? error.message : '';
+      setJoinError(
+        /(group|trip) not found|invite code not found/i.test(message)
+          ? 'This invite link or code is invalid or no longer active.'
+          : message || 'Could not request access.'
+      );
+    } finally {
+      setIsJoinSubmitting(false);
     }
   };
 
@@ -1017,7 +1110,7 @@ function PariteApp() {
       clearActiveMemberId();
       setWorkspace(null);
       setIsSideMenuOpen(false);
-      setActiveTab('expenses');
+      setActiveTab('overview');
       await refreshWorkspaces();
     } catch (error) {
       console.error(error);
@@ -1310,12 +1403,13 @@ function PariteApp() {
       applyWorkspace(nextWorkspace);
       await refreshWorkspaces();
       setIsSideMenuOpen(false);
+      setIsWorkspaceSettingsOpen(false);
       setIsCreatingTripView(false);
       setIsJoiningTripView(false);
       setSelectedExpenseIdForDetail(null);
       setIsAddingExpense(false);
       setIsExchangeRatesOpen(false);
-      setActiveTab('expenses');
+      setActiveTab('overview');
     } catch (error) {
       console.error(error);
       clearActiveMemberId();
@@ -1332,10 +1426,11 @@ function PariteApp() {
     setIsCreatingTripView(false);
     setIsJoiningTripView(false);
     setIsSideMenuOpen(false);
+    setIsWorkspaceSettingsOpen(false);
     setIsExchangeRatesOpen(false);
     setSelectedExpenseIdForDetail(null);
     setIsAddingExpense(false);
-    setActiveTab('expenses');
+    setActiveTab('overview');
     setActionError(null);
     setAppError(null);
     refreshWorkspaces();
@@ -1347,16 +1442,43 @@ function PariteApp() {
     setIsCreatingTripView(true);
     setIsJoiningTripView(false);
     setIsSideMenuOpen(false);
-    setActiveTab('expenses');
+    setIsWorkspaceSettingsOpen(false);
+    setActiveTab('overview');
   };
 
   const handleStartJoinTrip = () => {
     clearActiveMemberId();
+    clearInviteUrl();
     setWorkspace(null);
+    setInviteInput('');
+    setDisplayNameInput('');
+    setJoinError(null);
+    setJoinEntrySource('manual');
     setIsCreatingTripView(false);
     setIsJoiningTripView(true);
     setIsSideMenuOpen(false);
-    setActiveTab('expenses');
+    setIsWorkspaceSettingsOpen(false);
+    setActiveTab('overview');
+  };
+
+  const handleCancelJoinTrip = () => {
+    clearInviteUrl();
+    setInviteInput('');
+    setDisplayNameInput('');
+    setJoinError(null);
+    setJoinEntrySource('manual');
+    setIsJoiningTripView(false);
+    setIsCreatingTripView(false);
+  };
+
+  const handleJoinInviteCodeChange = (value: string) => {
+    setInviteInput(value.toUpperCase());
+    setJoinError(null);
+
+    if (joinEntrySource === 'link') {
+      clearInviteUrl();
+      setJoinEntrySource('manual');
+    }
   };
 
   const renderCenteredMessage = (title: string, message: string) => (
@@ -1388,12 +1510,38 @@ function PariteApp() {
           aria-describedby={authFeedbackId}
           className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4"
         >
+          {joinEntrySource === 'link' && inviteInput && (
+            <div
+              id="auth-invite-context"
+              className="header-wash flex items-start gap-3 rounded-2xl border border-[var(--color-border)] p-3"
+              role="status"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/80 text-[var(--color-positive)] shadow-sm">
+                <Link2 className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[var(--color-text)]">Your invite link is ready</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-muted)]">
+                  Sign in or create an account to review code{' '}
+                  <span className="break-all font-mono font-bold text-[var(--color-text)]">{inviteInput}</span>.
+                  A group admin must still approve your request.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="border-b border-slate-800 pb-3">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
               Parité account
             </p>
             <h2 id="auth-card-title" className="text-xl font-bold font-display text-white tracking-tight mt-1">
-              {authMode === 'signup' ? 'Create your account' : 'Log in to continue'}
+              {joinEntrySource === 'link'
+                ? authMode === 'signup'
+                  ? 'Create an account to join'
+                  : 'Log in to request access'
+                : authMode === 'signup'
+                  ? 'Create your account'
+                  : 'Log in to continue'}
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-2 leading-relaxed">
               {authMode === 'signup'
@@ -1677,7 +1825,7 @@ function PariteApp() {
           <div className="rounded-2xl border border-dashed border-slate-800 bg-[#121418] px-4 py-8 text-center">
             <p className="text-sm font-bold text-slate-200">No groups yet.</p>
             <p className="text-xs text-slate-500 mt-1">
-              Create a group or join one with an invite code.
+              Create a group or join one with an invite link or manual code.
             </p>
           </div>
         ) : (
@@ -1739,6 +1887,39 @@ function PariteApp() {
   );
 
   if (isSupabaseConfigured && !isBootstrapping && !authUser) {
+    if (joinEntrySource === 'link' && inviteInput) {
+      return (
+        <div className="min-h-[100dvh] overflow-y-auto bg-[var(--color-page-background)] px-4 py-6 font-sans sm:px-6 sm:py-10">
+          <main className="parite-shell mx-auto flex w-full max-w-lg flex-col gap-5">
+            <header className="text-center">
+              <span className="accent-glow mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-positive)] text-[#fff]">
+                <Link2 className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <p className="mt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-positive)]">
+                Group invitation
+              </p>
+              <h1 className="mt-1 font-display text-3xl font-bold tracking-tight text-[var(--color-text)]">
+                Continue to your invite
+              </h1>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[var(--color-muted)]">
+                Use your Parité account to request access. The invite code is already saved, and an admin will review your request.
+              </p>
+            </header>
+
+            {renderAuthCard()}
+
+            <button
+              type="button"
+              onClick={handleCancelJoinTrip}
+              className="mx-auto min-h-11 rounded-2xl px-4 text-xs font-bold text-[var(--color-muted)] hover:bg-white/60 hover:text-[var(--color-text)]"
+            >
+              Not joining now? Visit Parité
+            </button>
+          </main>
+        </div>
+      );
+    }
+
     return (
       <LandingPage
         authCard={renderAuthCard()}
@@ -1759,7 +1940,7 @@ function PariteApp() {
 
   return (
     <div className="h-[100dvh] bg-[var(--color-page-background)] flex flex-col md:p-6 items-center select-none font-sans overflow-hidden">
-      <div className="parite-shell w-full max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
+      <div className="parite-shell w-full max-w-md md:max-w-3xl lg:max-w-[1536px] bg-[var(--color-app-background)] border border-slate-800/80 md:rounded-[36px] shadow-2xl overflow-hidden h-[100dvh] md:h-[calc(100dvh-3rem)] flex flex-col relative">
         {authUser?.email && (
           <AccountSecuritySheet
             isOpen={isAccountSecurityOpen}
@@ -1772,17 +1953,21 @@ function PariteApp() {
         )}
         {activeTrip && (
           <>
-            <AppHeader
-              trip={activeTrip}
-              currentMember={currentMember}
-              onMenuOpen={() => setIsSideMenuOpen(true)}
-            />
+            <div className={currentMember?.status === 'approved' ? 'lg:hidden' : undefined}>
+              <AppHeader
+                trip={activeTrip}
+                currentMember={currentMember}
+                onMenuOpen={() => setIsSideMenuOpen(true)}
+              />
+            </div>
             <SideMenu
               isOpen={isSideMenuOpen}
               trip={activeTrip}
               currentMember={currentMember}
               accountEmail={authUser?.email ?? null}
               onAccountSettings={() => setIsAccountSecurityOpen(true)}
+              onOpenWorkspaceSettings={() => openWorkspaceSettings('settings')}
+              onOpenCloseout={() => openWorkspaceSettings('closeout')}
               onReplayGuidedTour={handleReplayGuidedTour}
               workspaces={workspaces}
               currentMemberId={currentMember?.id ?? null}
@@ -1790,24 +1975,43 @@ function PariteApp() {
               onSwitchWorkspace={handleSwitchWorkspace}
               onCreateTrip={handleStartCreateTrip}
               onJoinTrip={handleStartJoinTrip}
-              onAdminTools={() => {
-                setMembersInitialCategory('approved');
-                setActiveTab('members');
-              }}
-              onExchangeRates={() => setIsExchangeRatesOpen(true)}
-              onUpdateTripName={handleUpdateTripName}
-              onUpdateDisplayCurrency={handleUpdateDisplayCurrency}
-              onLeaveTrip={handleLeaveTrip}
-              onStartTripClosure={handleStartTripClosure}
-              onApproveTripClosure={handleApproveTripClosure}
-              onCancelTripClosure={handleCancelTripClosure}
-              onExportExpensesCsv={handleExportExpensesCsv}
-              onExportBalancesCsv={handleExportBalancesCsv}
-              onExportSettlementsCsv={handleExportSettlementsCsv}
-              exportBusy={exportBusy}
-              onActionError={setActionError}
               onLogout={handleLogout}
             />
+            {currentMember?.status === 'approved' && (
+              <WorkspaceSettingsSheet
+                isOpen={isWorkspaceSettingsOpen}
+                mode={workspaceSettingsMode}
+                trip={activeTrip}
+                currentMember={currentMember}
+                members={tripMembers}
+                closureVotes={tripClosureVotes}
+                closeoutBlockers={closeoutBlockers}
+                onClose={() => setIsWorkspaceSettingsOpen(false)}
+                onAdminTools={() => {
+                  setMembersInitialCategory('approved');
+                  setSelectedExpenseIdForDetail(null);
+                  setIsAddingExpense(false);
+                  setActiveTab('members');
+                }}
+                onExchangeRates={() => setIsExchangeRatesOpen(true)}
+                onUpdateTripName={handleUpdateTripName}
+                onUpdateDisplayCurrency={handleUpdateDisplayCurrency}
+                onLeaveTrip={handleLeaveTrip}
+                onStartTripClosure={handleStartTripClosure}
+                onApproveTripClosure={handleApproveTripClosure}
+                onCancelTripClosure={handleCancelTripClosure}
+                onReviewBalances={() => {
+                  setSelectedExpenseIdForDetail(null);
+                  setIsAddingExpense(false);
+                  setActiveTab('balances');
+                }}
+                onExportExpensesCsv={handleExportExpensesCsv}
+                onExportBalancesCsv={handleExportBalancesCsv}
+                onExportSettlementsCsv={handleExportSettlementsCsv}
+                exportBusy={exportBusy}
+                onActionError={setActionError}
+              />
+            )}
             {currentMember?.status === 'approved' && (
               <ExchangeRatesSheet
                 isOpen={isExchangeRatesOpen}
@@ -1874,89 +2078,22 @@ function PariteApp() {
           {isSupabaseConfigured && !isBootstrapping && authUser && !activeTrip && !currentMember && !isCreatingTripView && !isJoiningTripView && renderWorkspaceSelection()}
 
           {isSupabaseConfigured && !isBootstrapping && authUser && isJoiningTripView && !activeTrip && !currentMember && (
-            <div className="px-5 py-8 flex flex-col gap-6 flex-1 justify-center animate-fade-in bg-[#121418]">
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setIsJoiningTripView(false)}
-                  className="p-1 px-2.5 bg-slate-800 border border-slate-700/80 rounded-xl text-xs text-slate-300 font-semibold flex items-center hover:bg-slate-750 cursor-pointer"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5 mr-0.5" />
-                  <span>Back</span>
-                </button>
-              </div>
-
-              <div className="text-center">
-                <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-md mb-3.5 accent-glow">
-                  <Compass className="w-8 h-8 text-white stroke-[2.5]" />
-                </div>
-                <h1 className="text-2xl font-bold font-display text-white tracking-tight">
-                  Join group
-                </h1>
-                <p className="text-xs text-slate-500 font-medium mt-2 max-w-sm mx-auto">
-                  Enter an invite code and your group display name.
-                </p>
-              </div>
-
-              {renderAccountStrip()}
-
-              <form onSubmit={handleJoinTripSubmit} className="bg-[#1a1d23] border border-slate-800 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
-                <div className="border-b border-slate-800 pb-2.5">
-                  <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Join Shared Group
-                  </h2>
-                </div>
-
-                {joinError && (
-                  <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-[11px] flex items-start gap-1.5 leading-snug">
-                    <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>{joinError}</span>
-                  </div>
-                )}
-
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      Invite Code *
-                    </label>
-                    <input
-                      type="text"
-                      id="input-join-invite-code"
-                      required
-                      value={inviteInput}
-                      onChange={event => setInviteInput(event.target.value.toUpperCase())}
-                      placeholder="e.g. GRAD26"
-                      className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      Your Display Name *
-                    </label>
-                    <input
-                      type="text"
-                      id="input-join-display-name"
-                      required
-                      value={displayNameInput}
-                      onChange={event => setDisplayNameInput(event.target.value)}
-                      placeholder="e.g. Qotaqbas"
-                      className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  id="btn-join-submit"
-                  className="w-full bg-indigo-600 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Request Group Access</span>
-                </button>
-              </form>
-
-            </div>
+            <JoinGroupView
+              inviteCode={inviteInput}
+              displayName={displayNameInput}
+              isInviteLinkPrefilled={joinEntrySource === 'link'}
+              isSubmitting={isJoinSubmitting}
+              submitDisabled={!inviteInput.trim() || !displayNameInput.trim()}
+              error={joinError}
+              accountContext={renderAccountStrip()}
+              onInviteCodeChange={handleJoinInviteCodeChange}
+              onDisplayNameChange={(value) => {
+                setDisplayNameInput(value);
+                setJoinError(null);
+              }}
+              onSubmit={handleJoinTripSubmit}
+              onBack={handleCancelJoinTrip}
+            />
           )}
 
           {isSupabaseConfigured && !isBootstrapping && authUser && isCreatingTripView && !activeTrip && !currentMember && (
@@ -2128,18 +2265,46 @@ function PariteApp() {
           )}
 
           {activeTrip && currentMember && currentMember.status === 'approved' && (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#121418]">
-              {renderActionErrorBanner()}
+            <div className="flex min-h-0 flex-1 overflow-hidden bg-[#121418]">
+              <DesktopWorkspaceRail
+                trip={activeTrip}
+                currentMember={currentMember}
+                workspaces={workspaces}
+                currentMemberId={currentMember.id}
+                activeTab={activeTab}
+                onChangeTab={(tab) => {
+                  setActiveTab(tab);
+                  setSelectedExpenseIdForDetail(null);
+                  setIsAddingExpense(false);
+                  setSelectedBreakdownMemberId(null);
+                }}
+                pendingRequestsCount={memberManagementRequestCount}
+                showAdminBadge={currentMember.role === 'admin' || accountAccess?.role === 'admin'}
+                onSwitchWorkspace={handleSwitchWorkspace}
+                onCreateTrip={handleStartCreateTrip}
+                onJoinTrip={handleStartJoinTrip}
+                onOpenSettings={() => openWorkspaceSettings('settings')}
+                onOpenCloseout={() => openWorkspaceSettings('closeout')}
+                onAccountSettings={() => setIsAccountSecurityOpen(true)}
+                onReplayGuidedTour={handleReplayGuidedTour}
+              />
 
-              {!actionError && isWorkspaceLoading && (
-                <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400 flex items-start gap-2">
-                  <span className="flex-1">Loading the latest group data...</span>
-                </div>
-              )}
+              <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                {renderActionErrorBanner()}
 
-              <div className={`min-h-0 flex-1 ${activeTab === 'expenses' ? 'overflow-hidden' : 'no-scrollbar overflow-y-auto'}`}>
-                {activeTab === 'expenses' && (
-                  <ExpensesTab
+                {!actionError && isWorkspaceLoading && (
+                  <div className="mx-4 mt-3 rounded-2xl border border-slate-800 bg-[#1a1d23] px-3 py-2 text-[11px] text-slate-400 flex items-start gap-2">
+                    <span className="flex-1">Loading the latest group data...</span>
+                  </div>
+                )}
+
+                <main
+                  key={activeTab}
+                  aria-label={`${activeTab} workspace`}
+                  className={`min-h-0 flex-1 ${activeTab === 'expenses' ? 'overflow-hidden' : 'no-scrollbar overflow-y-auto'}`}
+                >
+                {activeTab === 'overview' && (
+                  <OverviewTab
                     trip={activeTrip}
                     currentMember={currentMember}
                     expenses={tripExpenses}
@@ -2147,17 +2312,79 @@ function PariteApp() {
                     settlements={tripSettlements}
                     exchangeRates={tripExchangeRates}
                     members={tripMembers}
-                    onCreateExpense={handleCreateExpense}
-                    onUpdateExpense={handleUpdateExpense}
-                    onDeleteExpense={handleDeleteExpense}
-                    selectedExpenseIdForDetail={selectedExpenseIdForDetail}
-                    onSetSelectedExpenseId={setSelectedExpenseIdForDetail}
-                    isAddingExpense={isAddingExpense}
-                    onSetAddingExpense={setIsAddingExpense}
+                    pendingRequestsCount={memberManagementRequestCount}
                     isReadOnly={!isTripActive}
-                    onActionError={setActionError}
+                    onAddExpense={() => {
+                      setSelectedExpenseIdForDetail(null);
+                      setIsAddingExpense(true);
+                      setActiveTab('expenses');
+                    }}
+                    onReviewBalances={() => {
+                      setSelectedExpenseIdForDetail(null);
+                      setIsAddingExpense(false);
+                      setActiveTab('balances');
+                    }}
+                    onManageMembers={() => {
+                      setMembersInitialCategory(memberManagementRequestCount > 0 ? 'requests' : 'approved');
+                      setSelectedExpenseIdForDetail(null);
+                      setIsAddingExpense(false);
+                      setActiveTab('members');
+                    }}
+                    onOpenExpense={(expenseId) => {
+                      setIsAddingExpense(false);
+                      setSelectedExpenseIdForDetail(expenseId);
+                      setActiveTab('expenses');
+                    }}
                   />
                 )}
+
+                  {activeTab === 'expenses' && (
+                    <div className="flex h-full min-h-0 overflow-hidden">
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <ExpensesTab
+                          trip={activeTrip}
+                          currentMember={currentMember}
+                          expenses={tripExpenses}
+                          splits={tripSplits}
+                          settlements={tripSettlements}
+                          exchangeRates={tripExchangeRates}
+                          members={tripMembers}
+                          onCreateExpense={handleCreateExpense}
+                          onUpdateExpense={handleUpdateExpense}
+                          onDeleteExpense={handleDeleteExpense}
+                          selectedExpenseIdForDetail={selectedExpenseIdForDetail}
+                          onSetSelectedExpenseId={setSelectedExpenseIdForDetail}
+                          isAddingExpense={isAddingExpense}
+                          onSetAddingExpense={setIsAddingExpense}
+                          isReadOnly={!isTripActive}
+                          onActionError={setActionError}
+                        />
+                      </div>
+                      <div className="no-scrollbar hidden shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-white/45 px-4 py-5 xl:block">
+                        <DesktopContextRail
+                          trip={activeTrip}
+                          currentMember={currentMember}
+                          expenses={tripExpenses}
+                          splits={tripSplits}
+                          settlements={tripSettlements}
+                          members={tripMembers}
+                          exchangeRates={tripExchangeRates}
+                          pendingRequestsCount={memberManagementRequestCount}
+                          onReviewBalances={() => {
+                            setSelectedExpenseIdForDetail(null);
+                            setIsAddingExpense(false);
+                            setActiveTab('balances');
+                          }}
+                          onManageMembers={() => {
+                            setMembersInitialCategory(memberManagementRequestCount > 0 ? 'requests' : 'approved');
+                            setSelectedExpenseIdForDetail(null);
+                            setIsAddingExpense(false);
+                            setActiveTab('members');
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                 {activeTab === 'balances' && (
                   <BalancesTab
@@ -2198,6 +2425,7 @@ function PariteApp() {
                     onRefresh={handleRefreshMembers}
                   />
                 )}
+                </main>
               </div>
             </div>
           )}
@@ -2245,6 +2473,10 @@ export default function App() {
       : 'expenses';
 
     return <PromoPreview format={format} screen={screen} />;
+  }
+
+  if (import.meta.env.DEV && preview === 'join') {
+    return <JoinPreview />;
   }
 
   return isUiPreview ? <UiPreview /> : <PariteApp />;

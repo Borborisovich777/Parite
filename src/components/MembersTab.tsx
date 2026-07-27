@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AccountAccess, Trip, Member } from '../types';
-import { Check, Clock, Copy, Pencil, RefreshCw, Shield, ShieldCheck, Trash2, UserCheck, UserPlus, UserX } from 'lucide-react';
+import { Clock, Pencil, RefreshCw, Shield, ShieldCheck, Trash2, UserCheck, UserPlus, UserX } from 'lucide-react';
+import { buildInviteUrl } from '../lib/inviteLinks';
+import { InviteShareCard } from './InviteShareCard';
 import { MemberAvatar } from './MemberAvatar';
 import { MemberAvatarPicker } from './MemberAvatarPicker';
 
@@ -55,10 +57,6 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   const [activeCategory, setActiveCategory] = useState<MemberCategory>(initialCategory);
   const [busyMemberAction, setBusyMemberAction] = useState<{ memberId: string; action: BusyMemberAction } | null>(null);
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
-  const [isRegeneratingInvite, setIsRegeneratingInvite] = useState(false);
-  const [copiedInvite, setCopiedInvite] = useState(false);
-  const [memberManagementError, setMemberManagementError] = useState<string | null>(null);
-  const copiedInviteTimeoutRef = useRef<number | null>(null);
 
   const isAdmin = currentMember.role === 'admin';
   const canManageRequests = isAdmin || isPlatformAdmin;
@@ -73,12 +71,6 @@ export const MembersTab: React.FC<MembersTabProps> = ({
     setActiveCategory(initialCategory);
   }, [initialCategory]);
 
-  useEffect(() => () => {
-    if (copiedInviteTimeoutRef.current !== null) {
-      window.clearTimeout(copiedInviteTimeoutRef.current);
-    }
-  }, []);
-
   const runMemberAction = async (memberId: string, actionType: BusyMemberAction, action: () => void | Promise<void>) => {
     setBusyMemberAction({ memberId, action: actionType });
     try {
@@ -91,59 +83,6 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   };
 
   const isMemberBusy = (memberId: string) => busyMemberAction?.memberId === memberId;
-
-  const copyInviteCode = async () => {
-    setMemberManagementError(null);
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(trip.invite_code);
-      } else {
-        const textArea = document.createElement('textarea');
-        textArea.value = trip.invite_code;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        try {
-          document.execCommand('copy');
-        } finally {
-          document.body.removeChild(textArea);
-        }
-      }
-      setCopiedInvite(true);
-      if (copiedInviteTimeoutRef.current !== null) {
-        window.clearTimeout(copiedInviteTimeoutRef.current);
-      }
-      copiedInviteTimeoutRef.current = window.setTimeout(() => {
-        setCopiedInvite(false);
-        copiedInviteTimeoutRef.current = null;
-      }, 1800);
-    } catch (error) {
-      console.error(error);
-      setMemberManagementError('Could not copy the invite code.');
-    }
-  };
-
-  const regenerateInviteCode = async () => {
-    if (!onRegenerateInviteCode || !confirm('Create a new invite code? The current code will stop working.')) return;
-
-    setIsRegeneratingInvite(true);
-    setMemberManagementError(null);
-    try {
-      await onRegenerateInviteCode();
-      setCopiedInvite(false);
-      if (copiedInviteTimeoutRef.current !== null) {
-        window.clearTimeout(copiedInviteTimeoutRef.current);
-        copiedInviteTimeoutRef.current = null;
-      }
-    } catch (error) {
-      console.error(error);
-      setMemberManagementError(error instanceof Error ? error.message : 'Could not create a new invite code.');
-    } finally {
-      setIsRegeneratingInvite(false);
-    }
-  };
 
   return (
     <div className={`flex flex-col gap-5 px-4 pb-24 pt-5 md:px-6 md:pb-6 lg:px-8 ${isAvatarPickerOpen ? '' : 'animate-fade-in'}`}>
@@ -183,58 +122,26 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       </div>
 
       {isAdmin && isTripActive && (
-        <section className="header-wash rounded-3xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-card)]">
-          <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-[var(--color-positive)] shadow-sm">
-              <UserPlus className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-bold text-[var(--color-text)]">Add a member</h2>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--color-muted)]">
-                Share this code. New join requests will appear in the Requests folder automatically.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1 rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 font-mono text-lg font-bold tracking-[0.18em] text-[var(--color-text)]">
-              {trip.invite_code}
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-              <button
-                type="button"
-                id="btn-copy-member-invite"
-                onClick={copyInviteCode}
-                className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-white px-4 text-xs font-bold text-[var(--color-positive)]"
-              >
-                {copiedInvite ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                {copiedInvite ? 'Copied' : 'Copy code'}
-              </button>
-              <button
-                type="button"
-                id="btn-regenerate-member-invite"
-                onClick={regenerateInviteCode}
-                disabled={isRegeneratingInvite || !onRegenerateInviteCode}
-                className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-4 text-xs font-bold text-[var(--color-negative)] disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 ${isRegeneratingInvite ? 'animate-spin' : ''}`} />
-                New code
-              </button>
-            </div>
-          </div>
-
-          {memberManagementError && (
-            <p className="mt-3 rounded-2xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 py-2 text-xs font-bold text-[var(--color-negative)]">
-              {memberManagementError}
-            </p>
-          )}
-        </section>
+        <InviteShareCard
+          groupName={trip.name}
+          inviteCode={trip.invite_code}
+          inviteUrl={buildInviteUrl(trip.invite_code, window.location.href)}
+          onRegenerateInviteCode={onRegenerateInviteCode}
+        />
       )}
 
       {canManageRequests && (
-        <div className={`grid shrink-0 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <div
+          className={`grid shrink-0 gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-1 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}
+          role="tablist"
+          aria-label="Member categories"
+        >
           <button
             type="button"
+            id="members-approved-tab"
+            role="tab"
+            aria-selected={activeCategory === 'approved'}
+            aria-controls="members-approved-panel"
             onClick={() => setActiveCategory('approved')}
             className={`min-h-10 rounded-xl px-1 text-[10px] font-bold transition-all cursor-pointer ${
               activeCategory === 'approved'
@@ -248,6 +155,9 @@ export const MembersTab: React.FC<MembersTabProps> = ({
           <button
             type="button"
             id="btn-requests-filter"
+            role="tab"
+            aria-selected={activeCategory === 'requests'}
+            aria-controls="members-requests-panel"
             onClick={() => setActiveCategory('requests')}
             className={`relative min-h-10 rounded-xl px-1 text-[10px] font-bold transition-all cursor-pointer ${
               activeCategory === 'requests'
@@ -266,6 +176,10 @@ export const MembersTab: React.FC<MembersTabProps> = ({
           {isAdmin && (
             <button
               type="button"
+              id="members-inactive-tab"
+              role="tab"
+              aria-selected={activeCategory === 'removed'}
+              aria-controls="members-inactive-panel"
               onClick={() => setActiveCategory('removed')}
               className={`min-h-10 rounded-xl px-1 text-[10px] font-bold transition-all cursor-pointer ${
                 activeCategory === 'removed'
@@ -280,7 +194,10 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {isPlatformAdmin && accountRequestsError && (
-        <div className="flex items-start gap-2 rounded-2xl border border-[var(--color-negative)]/20 bg-[var(--color-negative-soft)] px-3 py-2.5 text-xs text-[var(--color-negative)]">
+        <div
+          className="flex items-start gap-2 rounded-2xl border border-[var(--color-negative)]/20 bg-[var(--color-negative-soft)] px-3 py-2.5 text-xs text-[var(--color-negative)]"
+          role="alert"
+        >
           <UserX className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-bold">Account requests could not be refreshed</p>
@@ -290,7 +207,12 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {(!canManageRequests || activeCategory === 'approved') && (
-        <section className="grid gap-3 lg:grid-cols-2">
+        <section
+          id={canManageRequests ? 'members-approved-panel' : undefined}
+          role={canManageRequests ? 'tabpanel' : undefined}
+          aria-labelledby={canManageRequests ? 'members-approved-tab' : undefined}
+          className="grid gap-3 lg:grid-cols-2"
+        >
           {approvedMembers.map(member => {
             const isCurrentUser = member.id === currentMember.id;
 
@@ -397,7 +319,12 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {canManageRequests && activeCategory === 'requests' && (
-        <section className="flex flex-col gap-4">
+        <section
+          id="members-requests-panel"
+          role="tabpanel"
+          aria-labelledby="btn-requests-filter"
+          className="flex flex-col gap-4"
+        >
           {pendingRequestCount === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--color-border)] bg-white px-4 py-12 text-center text-[var(--color-muted)] lg:col-span-2">
               <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-positive-soft)] text-[var(--color-positive)]">
@@ -472,7 +399,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
                     <UserPlus className="h-4 w-4 text-[var(--color-positive)]" />
                     Group join requests
                   </h2>
-                  <p className="mt-1 text-[10px] text-[var(--color-muted)]">Approve people who used this group's invite code.</p>
+                  <p className="mt-1 text-[10px] text-[var(--color-muted)]">Approve people who used this group's invite link, QR, or manual code.</p>
                 </div>
                 <span className="rounded-full bg-[var(--color-positive-soft)] px-2.5 py-1 text-[10px] font-bold text-[var(--color-positive)]">
                   {pendingRequests.length}
@@ -536,7 +463,12 @@ export const MembersTab: React.FC<MembersTabProps> = ({
       )}
 
       {isAdmin && activeCategory === 'removed' && (
-        <section className="grid gap-3 lg:grid-cols-2">
+        <section
+          id="members-inactive-panel"
+          role="tabpanel"
+          aria-labelledby="members-inactive-tab"
+          className="grid gap-3 lg:grid-cols-2"
+        >
           {otherMembers.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--color-border)] bg-white px-4 py-10 text-center lg:col-span-2">
               <p className="text-sm font-semibold text-[var(--color-text)]">No inactive members</p>

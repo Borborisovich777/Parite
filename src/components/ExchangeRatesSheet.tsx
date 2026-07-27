@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Save, X } from 'lucide-react';
 import { Currency, ExchangeRate, Member, SUPPORTED_CURRENCIES, Trip } from '../types';
 import { isDecimalInputValue, normalizeDecimalInput, parsePositiveDecimal } from '../lib/decimalInput';
@@ -16,6 +16,15 @@ interface ExchangeRatesSheetProps {
   onActionError?: (message: string) => void;
 }
 
+const focusableSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
 export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   isOpen,
   trip,
@@ -27,6 +36,12 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   onUpdateRate,
   onActionError,
 }) => {
+  const headingId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const [rateInputs, setRateInputs] = useState<Record<string, string>>({});
   const [savingPair, setSavingPair] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +70,10 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
   }, [members]);
 
   useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     const nextInputs: Record<string, string> = {};
@@ -67,6 +86,92 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
     setError(null);
     setSavingPair(null);
   }, [isOpen, pairs, safeExchangeRates, trip?.id, tripBaseCurrency]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      const focusableCandidates = Array.from(
+        dialog.querySelectorAll(focusableSelector),
+      ) as HTMLElement[];
+      const focusableElements = focusableCandidates.filter(element => (
+        !element.hasAttribute('disabled')
+        && element.getAttribute('aria-hidden') !== 'true'
+        && element.getClientRects().length > 0
+        && window.getComputedStyle(element).visibility !== 'hidden'
+      ));
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey && (activeElement === firstElement || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && (activeElement === lastElement || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.body.style.overflow = previousBodyOverflow;
+
+      const isVisibleFocusTarget = (element: HTMLElement | null): element is HTMLElement => Boolean(
+        element
+        && element !== document.body
+        && element.isConnected
+        && element.getClientRects().length > 0
+        && window.getComputedStyle(element).visibility !== 'hidden',
+      );
+      const previousFocus = previouslyFocusedElementRef.current;
+      previouslyFocusedElementRef.current = null;
+
+      if (isVisibleFocusTarget(previousFocus)) {
+        previousFocus.focus();
+        return;
+      }
+
+      const fallbackFocus = [
+        document.getElementById('btn-menu-exchange-rates'),
+        document.getElementById('btn-desktop-group-settings'),
+        document.getElementById('btn-open-side-menu'),
+      ].find(isVisibleFocusTarget);
+      fallbackFocus?.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -160,28 +265,41 @@ export const ExchangeRatesSheet: React.FC<ExchangeRatesSheetProps> = ({
     <div className="fixed inset-0 z-[60] flex items-end justify-center md:items-center md:p-6">
       <button
         type="button"
+        tabIndex={-1}
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] cursor-default"
         aria-label="Close exchange rates"
         onClick={onClose}
       />
 
-      <section className="relative z-10 flex max-h-[94dvh] min-h-0 w-full max-w-md flex-col overflow-hidden rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-h-[calc(100dvh-3rem)] md:max-w-2xl md:rounded-[28px]">
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        className="relative z-10 flex max-h-[94dvh] min-h-0 w-full max-w-md flex-col overflow-hidden rounded-t-[28px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-h-[calc(100dvh-3rem)] md:max-w-2xl md:rounded-[28px]"
+      >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-4">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
               Exchange rates
             </p>
-            <h2 className="text-lg font-bold text-white font-display truncate">
+            <h2 id={headingId} className="text-lg font-bold text-white font-display truncate">
               Defaults to {tripBaseCurrency}
             </h2>
+            <p id={descriptionId} className="sr-only">
+              View or manage the exchange rates used by {trip.name}.
+            </p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="w-10 h-10 rounded-xl bg-[#1a1d23] border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
             aria-label="Close exchange rates"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
