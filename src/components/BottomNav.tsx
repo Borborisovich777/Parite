@@ -1,7 +1,7 @@
 import React from 'react';
-import { Receipt, Scale, Users } from 'lucide-react';
+import { House, Receipt, Scale, Users } from 'lucide-react';
 
-export type TabType = 'expenses' | 'balances' | 'members';
+export type TabType = 'overview' | 'expenses' | 'balances' | 'members';
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -19,6 +19,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   variant = 'mobile',
 }) => {
   const tabs = [
+    { id: 'overview', label: 'Overview', icon: House },
     { id: 'expenses', label: 'Expenses', icon: Receipt },
     { id: 'balances', label: 'Balances', icon: Scale },
     { id: 'members', label: 'Members', icon: Users, badge: showAdminBadge ? pendingRequestsCount : 0 },
@@ -26,11 +27,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
   const isDesktop = variant === 'desktop';
   const containerClassName = isDesktop
-    ? 'hidden w-full min-w-0 shrink-0 grid-cols-3 gap-2 border-b border-[var(--color-border)] bg-white/95 px-4 py-2 backdrop-blur-xl md:grid lg:px-6 xl:px-8'
+    ? 'hidden w-full min-w-0 shrink-0 grid-cols-4 gap-2 border-b border-[var(--color-border)] bg-white/95 px-4 py-2 backdrop-blur-xl md:grid lg:hidden'
     : 'bottom-nav-safe fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/95 backdrop-blur-xl border-t border-[var(--color-border)] flex items-start justify-around px-2 pt-1 z-30 shadow-[0_-10px_30px_rgba(40,73,60,0.09)] shrink-0 md:hidden';
 
   return (
-    <div className={containerClassName}>
+    <nav
+      className={containerClassName}
+      aria-label={isDesktop ? 'Primary tablet navigation' : 'Primary navigation'}
+    >
       {tabs.map(tab => {
         const IconComponent = tab.icon;
         const isActive = activeTab === tab.id;
@@ -65,6 +69,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 };
