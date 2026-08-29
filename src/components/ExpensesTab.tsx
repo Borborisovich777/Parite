@@ -40,6 +40,11 @@ import {
   writeExpenseVisualPreference,
   type ExpenseVisualId,
 } from '../lib/expenseVisuals';
+import { isReceiptImportEnabled } from '../features/receipt/config';
+import {
+  ReceiptImportFlow,
+  type ReceiptExpenseDraft,
+} from '../features/receipt/ReceiptImportFlow';
 
 interface ExpensesTabProps {
   trip: Trip;
@@ -147,6 +152,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const [formStep, setFormStep] = useState<FormStep>('basic');
   const [showCustomizeSplit, setShowCustomizeSplit] = useState(false);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [hasReceiptImportSession, setHasReceiptImportSession] = useState(false);
+  const [hasAppliedReceiptDraft, setHasAppliedReceiptDraft] = useState(false);
+  const [isReceiptImportOpen, setIsReceiptImportOpen] = useState(false);
 
   const [formTitle, setFormTitle] = useState('');
   const [formVisualId, setFormVisualId] = useState<ExpenseVisualId | null>(null);
@@ -397,6 +405,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormCustomSplits(custom);
   };
 
+  const clearReceiptImportSession = () => {
+    setIsReceiptImportOpen(false);
+    setHasReceiptImportSession(false);
+    setHasAppliedReceiptDraft(false);
+  };
+
   const resetFormView = (reason: string) => {
     setFormStepWithReason('basic', `reset:${reason}`);
     setShowCustomizeSplit(false);
@@ -405,6 +419,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const closeForm = () => {
+    clearReceiptImportSession();
     onSetAddingExpense(false);
     setEditingExpense(null);
     setFormVisualId(null);
@@ -422,6 +437,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const handleOpenAddForm = () => {
     if (isReadOnly) return;
 
+    clearReceiptImportSession();
     const activeIds = approvedMembers.map(m => m.id);
     setFormTitle('');
     setFormVisualId(null);
@@ -446,6 +462,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const handleOpenEditForm = (expense: Expense) => {
     if (isReadOnly) return;
 
+    clearReceiptImportSession();
     const expenseSplits = splits.filter(s => s.expense_id === expense.id);
     const participantIds = expenseSplits.map(s => s.member_id);
     const expenseSubtotal = expense.subtotal_amount ?? expense.amount;
@@ -508,6 +525,36 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormError(null);
     onSetAddingExpense(false);
     onSetSelectedExpenseId(null);
+  };
+
+  const handleApplyReceiptDraft = (draft: ReceiptExpenseDraft) => {
+    const customSplits: Record<string, string> = {};
+    draft.participantIds.forEach(memberId => {
+      customSplits[memberId] = ((draft.baseShareMinorByMember[memberId] ?? 0) / 100).toFixed(2);
+    });
+
+    setFormTitle(draft.title);
+    setFormAmount((draft.totalMinor / 100).toFixed(2));
+    setFormCurrencyWithReason(draft.currency, 'receipt-import');
+    setFormDate(draft.expenseDate);
+    setFormPayer(draft.payerId);
+    setIsServiceFeeEnabled(false);
+    setFeePercentInput('');
+    setFeeLabelInput('Service fee');
+    setFormParticipants(draft.participantIds);
+    setFormSplitMethod('custom');
+    setFormCustomSplits(customSplits);
+    setUseCustomExchangeRate(draft.rateMode === 'custom');
+    setCustomExchangeRateInput(
+      draft.rateMode === 'custom' ? draft.exchangeRateToBase.toString() : '',
+    );
+    setShowCustomizeSplit(true);
+    setShowMoreOptions(draft.currency !== tripBaseCurrency || draft.rateMode === 'custom');
+    setFormError(null);
+    setHasReceiptImportSession(true);
+    setHasAppliedReceiptDraft(true);
+    setIsReceiptImportOpen(false);
+    setFormStepWithReason('preview', 'receipt-import-applied');
   };
 
   const validateBasicFields = () => {
@@ -706,6 +753,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const isFormOpen = isAddingExpense || Boolean(editingExpense);
 
+  useEffect(() => {
+    if (isFormOpen) return;
+    setIsReceiptImportOpen(false);
+    setHasReceiptImportSession(false);
+    setHasAppliedReceiptDraft(false);
+  }, [isFormOpen]);
+
   useLayoutEffect(() => {
     if (!isFormOpen) return;
     formScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
@@ -779,6 +833,40 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{formError}</span>
               </div>
+            )}
+
+            {isReceiptImportEnabled && !editingExpense && (
+              <section className="mx-auto mb-4 flex w-full max-w-4xl items-center gap-3 rounded-[24px] border border-[#81b29a]/45 bg-[#e7f3ee] p-3 shadow-sm">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-[#2f7d66] shadow-sm">
+                  <Receipt className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-900">
+                    {hasAppliedReceiptDraft
+                      ? 'Receipt split applied'
+                      : hasReceiptImportSession
+                        ? 'Receipt scan in progress'
+                        : 'Split from a receipt'}
+                  </p>
+                  <p className="mt-0.5 text-[10px] leading-4 text-slate-600">
+                    {hasAppliedReceiptDraft
+                      ? 'Review items before saving. The photo and rows are still temporary.'
+                      : hasReceiptImportSession
+                        ? 'Continue checking items and assigning people.'
+                        : 'Read item rows, assign people, then return to this preview.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasReceiptImportSession(true);
+                    setIsReceiptImportOpen(true);
+                  }}
+                  className="min-h-11 shrink-0 rounded-xl bg-[#81b29a] px-3 text-xs font-bold text-[#16372b]"
+                >
+                  {hasReceiptImportSession ? 'Review' : 'Scan'}
+                </button>
+              </section>
             )}
 
             {formStep === 'basic' ? (
@@ -2000,6 +2088,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {isReceiptImportEnabled && hasReceiptImportSession && !editingExpense && (
+        <ReceiptImportFlow
+          isOpen={isReceiptImportOpen}
+          tripId={trip.id}
+          tripBaseCurrency={tripBaseCurrency}
+          exchangeRates={safeExchangeRates}
+          members={approvedMembers}
+          currentMember={currentMember}
+          onClose={clearReceiptImportSession}
+          onApply={handleApplyReceiptDraft}
+        />
       )}
 
       {showDeleteConfirm && (
