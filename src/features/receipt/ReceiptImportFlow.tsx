@@ -25,6 +25,7 @@ import { parsePositiveDecimal } from '../../lib/decimalInput';
 import { MemberAvatar } from '../../components/MemberAvatar';
 import { allocateEqualMinor } from './allocation';
 import { calculateReceiptSplits } from './calculateReceiptSplits';
+import { isReceiptImportMockEnabled } from './config';
 import { extractReceipt } from './extractReceipt';
 import { parseMoneyToMinor } from './money';
 import { preprocessReceiptImage } from './preprocessReceiptImage';
@@ -377,6 +378,9 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
     setAdjustments(extractedAdjustments);
     setExcludedAdjustments([]);
     setWarnings([
+      ...(isReceiptImportMockEnabled
+        ? ['Demo mode is showing fixed sample rows. This image was not scanned.']
+        : []),
       ...receipt.warnings,
       ...(receipt.currency ? [] : ['Currency was not detected. Confirm it before continuing.']),
       ...(receipt.purchasedAt && !normalizedDate ? ['The receipt date was not usable. Confirm the date before continuing.'] : []),
@@ -672,8 +676,12 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
     summary: 'Review split',
   }[step];
   const stepDescription = {
-    capture: 'The photo is processed once and is never saved by Parité.',
-    extracting: 'Preparing the image and reading item rows.',
+    capture: isReceiptImportMockEnabled
+      ? 'Demo mode uses fixed sample rows and does not scan the image.'
+      : 'The photo is processed once and is never saved by Parité.',
+    extracting: isReceiptImportMockEnabled
+      ? 'Loading fixed sample rows for interface testing.'
+      : 'Preparing the image and reading item rows.',
     review: 'Correct anything the receipt reader missed.',
     assign: 'Choose who shared each item.',
     summary: 'Confirm exact totals before returning to the expense.',
@@ -729,6 +737,17 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
 
           {step === 'capture' && (
             <section className="rounded-[28px] border border-black/10 bg-white p-5 text-center shadow-sm">
+              {isReceiptImportMockEnabled && (
+                <div role="status" className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-left text-amber-950">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide">Demo extraction is on</p>
+                    <p className="mt-1 text-xs leading-5">
+                      Uploaded images are not scanned. Fixed sample rows are shown only for interface testing.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-[#e7f3ee] text-[#2f7d66]">
                 <ScanLine className="h-8 w-8" />
               </div>
@@ -805,9 +824,13 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
               )}
               <div className="mt-5 flex items-center justify-center gap-2 text-sm font-bold text-slate-800">
                 <LoaderCircle className="h-5 w-5 animate-spin text-[#2f7d66]" />
-                Reading item names and prices…
+                {isReceiptImportMockEnabled ? 'Loading fixed demo rows…' : 'Reading item names and prices…'}
               </div>
-              <p className="mt-2 text-xs text-slate-500">Keep this screen open. Manual entry remains available if reading fails.</p>
+              <p className="mt-2 text-xs text-slate-500">
+                {isReceiptImportMockEnabled
+                  ? 'The selected image is not scanned in demo mode.'
+                  : 'Keep this screen open. Manual entry remains available if reading fails.'}
+              </p>
             </section>
           )}
 

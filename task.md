@@ -225,6 +225,8 @@ Accessibility acceptance:
 
 2026-08-29 — The mock-backed four-step flow now covers capture, editable receipt review, exclusion/restoration, zoom/rotation, item assignment, live exact totals, final review, and totals-only/manual fallback. Keyboard focus trapping and restoration were exercised, including reverse-tab wrapping. The logical stages remain in one isolated `ReceiptImportFlow` component; splitting those stages into smaller React components remains open as a maintainability refactor.
 
+2026-08-29 — Follow-up after preview QA: mock extraction returns fixed sample rows and is now labeled explicitly before, during, and after image selection. Mock extraction remains opt-in through an explicit development-only flag; live OCR still requires the provider gate and Edge Function configuration below.
+
 ### Phase 5: Existing expense-flow integration
 
 - [x] Populate the existing expense title, date, currency, payer, amount, and exchange-rate fields from reviewed values.
