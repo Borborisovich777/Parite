@@ -960,14 +960,8 @@ function PariteApp() {
     };
   };
 
-  const handleChangeAccountPassword = async (
-    currentPassword: string,
-    nextPassword: string,
-  ): Promise<void> => {
-    const currentEmail = authUser?.email;
-    if (!currentEmail) throw new Error('This account does not have an email address for verification.');
-
-    const updatedUser = await changeAccountPassword(currentEmail, currentPassword, nextPassword);
+  const handleChangeAccountPassword = async (nextPassword: string): Promise<void> => {
+    const updatedUser = await changeAccountPassword(nextPassword);
     setAuthUser(updatedUser);
   };
 

@@ -188,14 +188,8 @@ export async function changeAccountEmail(
   return data.user;
 }
 
-export async function changeAccountPassword(
-  email: string,
-  currentPassword: string,
-  nextPassword: string,
-): Promise<User> {
+export async function changeAccountPassword(nextPassword: string): Promise<User> {
   const client = requireSupabase();
-  await reauthenticateWithPassword(email, currentPassword);
-
   const { data, error } = await client.auth.updateUser({ password: nextPassword });
   if (error) throwAuthError(error);
   if (!data.user) throw new Error('Could not update the account password.');

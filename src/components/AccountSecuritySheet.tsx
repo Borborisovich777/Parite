@@ -25,7 +25,7 @@ interface AccountSecuritySheetProps {
     currentPassword: string,
     nextEmail: string,
   ) => Promise<AccountEmailChangeResult>;
-  onChangePassword: (currentPassword: string, nextPassword: string) => Promise<void>;
+  onChangePassword: (nextPassword: string) => Promise<void>;
 }
 
 interface PasswordFieldProps {
@@ -137,7 +137,6 @@ export const AccountSecuritySheet: React.FC<AccountSecuritySheetProps> = ({
 }) => {
   const [newEmail, setNewEmail] = useState('');
   const [emailPassword, setEmailPassword] = useState('');
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busyForm, setBusyForm] = useState<'email' | 'password' | null>(null);
@@ -148,7 +147,6 @@ export const AccountSecuritySheet: React.FC<AccountSecuritySheetProps> = ({
   const dialogRef = useRef<HTMLElement>(null);
   const newEmailRef = useRef<HTMLInputElement>(null);
   const emailPasswordRef = useRef<HTMLInputElement>(null);
-  const currentPasswordRef = useRef<HTMLInputElement>(null);
   const newPasswordRef = useRef<HTMLInputElement>(null);
   const confirmPasswordRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -162,7 +160,6 @@ export const AccountSecuritySheet: React.FC<AccountSecuritySheetProps> = ({
   useEffect(() => {
     setNewEmail('');
     setEmailPassword('');
-    setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
     setBusyForm(null);
@@ -295,11 +292,6 @@ export const AccountSecuritySheet: React.FC<AccountSecuritySheetProps> = ({
       newPasswordRef.current?.focus();
       return;
     }
-    if (newPassword === currentPassword) {
-      setPasswordError('Choose a new password that differs from the current one.');
-      newPasswordRef.current?.focus();
-      return;
-    }
     if (newPassword !== confirmPassword) {
       setPasswordError('The new password confirmation does not match.');
       confirmPasswordRef.current?.focus();
@@ -309,15 +301,13 @@ export const AccountSecuritySheet: React.FC<AccountSecuritySheetProps> = ({
     busyRef.current = true;
     setBusyForm('password');
     try {
-      await onChangePassword(currentPassword, newPassword);
-      setCurrentPassword('');
+      await onChangePassword(newPassword);
       setNewPassword('');
       setConfirmPassword('');
       setPasswordStatus('Password updated. Use the new password the next time you sign in.');
     } catch (error) {
       setPasswordError(getAccountErrorMessage(error, 'Could not update the password. Try again.'));
-      if (getAuthErrorCode(error) === 'invalid_credentials') currentPasswordRef.current?.focus();
-      else newPasswordRef.current?.focus();
+      newPasswordRef.current?.focus();
     } finally {
       busyRef.current = false;
       setBusyForm(null);
@@ -464,15 +454,6 @@ export const AccountSecuritySheet: React.FC<AccountSecuritySheetProps> = ({
             </div>
 
             <div className="mt-4 space-y-3">
-              <PasswordField
-                id="input-account-current-password"
-                label="Current password"
-                value={currentPassword}
-                onChange={setCurrentPassword}
-                autoComplete="current-password"
-                disabled={isBusy}
-                inputRef={currentPasswordRef}
-              />
               <PasswordField
                 id="input-account-new-password"
                 label="New password"
