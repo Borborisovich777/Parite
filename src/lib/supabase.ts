@@ -60,6 +60,20 @@ export async function signInWithEmail(email: string, password: string): Promise<
   return data.user ?? null;
 }
 
+export async function sendPasswordResetEmail(email: string, redirectTo: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throwAuthError(error);
+}
+
+export async function setRecoveredPassword(password: string): Promise<User> {
+  const client = requireSupabase();
+  const { data, error } = await client.auth.updateUser({ password });
+  if (error) throwAuthError(error);
+  if (!data.user) throw new Error('Could not update the account password.');
+  return data.user;
+}
+
 export async function signOut(): Promise<void> {
   const client = requireSupabase();
   const { error } = await client.auth.signOut();
