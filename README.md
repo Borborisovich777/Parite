@@ -203,7 +203,7 @@ dist
 ```
 
 5. Deploy and open the production URL.
-6. Verify Supabase Auth redirect/site URL settings match your deployed domain if your auth configuration requires it.
+6. Set the Supabase Auth Site URL to the deployed domain and add that domain to the allowed Redirect URLs. Password-reset links return users to the same Parité URL that requested the reset.
 
 Do not add service role keys or database passwords to Vercel for this frontend app.
 
