@@ -4,6 +4,7 @@ import { SafeHttpError, toSafeHttpError } from './errors.ts';
 import { readStreamLimited } from './http.ts';
 import { type ImageLimits, type ValidatedImage, validateImage } from './image.ts';
 import type { ProviderInput } from './provider.ts';
+import type { ReceiptQuotaLimiter, ReceiptQuotaReservation } from './quota.ts';
 
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 const MAX_CONTENT_TYPE_LENGTH = 300;
@@ -20,6 +21,8 @@ export type ReceiptExtractor = (
 
 export type ReceiptHandlerDependencies = {
   accessVerifier: AccessVerifier;
+  quotaLimiter: ReceiptQuotaLimiter;
+  assertReady: () => void;
   extract: ReceiptExtractor;
   config: ReceiptHandlerConfig;
 };
@@ -56,6 +59,24 @@ export function createReceiptHandler(
       const { userId } = await dependencies.accessVerifier.authenticate(request, controller.signal);
       parsed = await parseReceiptForm(request, dependencies.config.imageLimits, controller.signal);
       await dependencies.accessVerifier.verifyTripMembership(userId, parsed.tripId, controller.signal);
+      // Validate provider configuration before consuming quota. Once reserved,
+      // the attempt counts even if Azure times out or returns unusable data.
+      dependencies.assertReady();
+      const quota = await dependencies.quotaLimiter.reserve(userId, controller.signal);
+      setQuotaHeaders(headers, quota);
+      if (!quota.allowed) {
+        throw quota.reason === 'user_limit'
+          ? new SafeHttpError(
+            429,
+            'receipt_quota_exceeded',
+            `You have used all ${quota.limit} receipt scans for this month. You can still enter the expense manually.`,
+          )
+          : new SafeHttpError(
+            429,
+            'receipt_capacity_reached',
+            'Receipt scanning has reached its shared monthly limit. You can still enter the expense manually.',
+          );
+      }
       const result = await dependencies.extract({
         bytes: parsed.bytes,
         contentType: parsed.image.contentType,
@@ -161,7 +182,7 @@ function isMultipartContentType(value: string): boolean {
 }
 
 function errorResponse(error: SafeHttpError, headers: Headers): Response {
-  return new Response(JSON.stringify({ error: error.safeMessage }), {
+  return new Response(JSON.stringify({ error: error.safeMessage, code: error.code }), {
     status: error.status,
     headers,
   });
@@ -172,6 +193,8 @@ function responseHeaders(): Headers {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'POST, OPTIONS',
     'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info',
+    'access-control-expose-headers':
+      'x-receipt-scans-limit, x-receipt-scans-remaining, x-receipt-scans-reset-at',
     'access-control-max-age': '600',
     'cache-control': 'no-store, max-age=0',
     pragma: 'no-cache',
@@ -181,4 +204,10 @@ function responseHeaders(): Headers {
     vary: 'Origin',
   });
   return headers;
+}
+
+function setQuotaHeaders(headers: Headers, quota: ReceiptQuotaReservation): void {
+  headers.set('x-receipt-scans-limit', String(quota.limit));
+  headers.set('x-receipt-scans-remaining', String(quota.remaining));
+  headers.set('x-receipt-scans-reset-at', quota.resetAt);
 }

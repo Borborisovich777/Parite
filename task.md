@@ -189,7 +189,12 @@ Acceptance:
 - [x] If deletion fails, return a sanitized privacy error rather than claiming successful deletion; do not return extracted receipt content.
 - [x] Release references to image and provider response buffers after processing.
 - [x] Return sanitized errors for authentication, limits, timeout, extraction failure, malformed output, and deletion failure.
-- [ ] Allow one in-flight scan in the client and configure provider/account quotas. Add durable server-side rate limiting only if available without storing receipt content.
+- [x] Allow only one in-flight scan in each browser flow.
+- [x] Enforce atomic metadata-only limits of 10 provider attempts per user and 450 total per UTC month.
+- [x] Expose personal remaining-scan status without exposing global usage; preserve manual and totals-only fallbacks at zero.
+- [x] Default Azure result polling to a 1,100 ms floor for its documented F0 GET cadence.
+- [ ] Configure the live Azure account quota/alerts and verify resource-wide Analyze/GET concurrency plus 429 behavior.
+- [ ] Configure a gateway-level per-user request limit; monthly scan quotas protect provider calls, not repeated invalid request bodies.
 
 Acceptance:
 
@@ -199,6 +204,8 @@ Acceptance:
 - Provider timeout and deletion-failure paths expose no receipt data.
 
 2026-08-29 — Added a stateless authenticated Edge Function and provider-neutral contract. The Azure `prebuilt-receipt` adapter is implemented behind inactive configuration and tested with in-memory fakes; deletion must succeed before normalized data is returned. The client aborts any previous request before starting another, so only one scan is active per browser flow. Deno check/fmt/lint pass and 12/12 Edge tests pass. Provider gate, live integration, quota/spend configuration, and durable rate limiting remain blocked. No credentials, deployment, or live provider call were attempted.
+
+2026-08-30 — Added concurrency-safe UTC monthly counters containing only user IDs, month keys, and counts. The Edge Function now validates authentication, image, trip membership, and provider configuration before atomically reserving one of 10 personal and 450 shared attempts; denied or unavailable quota checks fail closed before Azure. The browser reads a lightweight personal status RPC, displays the remaining count, disables further scans at exhaustion, and keeps full manual and totals-only entry available. A 1,100 ms Azure polling floor protects each individual job. Resource-wide F0 concurrency, SQL boundary/race verification, provider credentials, account alerts, and live deployment remain rollout blockers.
 
 ### Phase 4: Receipt review and assignment UI
 
@@ -258,9 +265,15 @@ Acceptance:
 - [ ] Inspect browser network traffic, Supabase Storage, database writes, function logs, and error reporting to verify the privacy invariant.
 - [ ] Benchmark 30–50 representative receipts in the required languages before production enablement.
 - [ ] Record exact-total accuracy, line-item recall, correction rate, reconciliation failure, latency, and provider cost per accepted receipt.
+- [x] Test quota response parsing, reservation order, personal/shared denial, unavailable quota storage, and response headers with in-memory fakes.
+- [ ] Test personal/shared exhausted UI states and the full manual-entry action against a local or staging quota response.
+- [ ] Verify 10th/11th and 450th/451st reservations, UTC rollover, and concurrent boundary races against local or staging Supabase.
+- [ ] Verify concurrent Azure F0 jobs, Analyze/GET throttling, and bounded 429 behavior with the selected live resource.
 - [x] Keep the production feature flag disabled until privacy review and go/no-go criteria pass.
 
 2026-08-29 — Verification passes: frontend tests 29/29, Edge tests 12/12, TypeScript lint, production build, Deno check/fmt/lint, and `git diff --check`. Enabled mock QA covered 390×844, 451×744, 1280×900, landscape, file upload, cancellation cleanup, exact assignment, exclusion/restoration, zoom/rotation, totals-only fallback, and existing-preview handoff; the disabled state was tested separately and left the manual form unchanged. The build retains the existing large-chunk warning. Hardware camera, complete offline/provider failure coverage, live privacy inspection, and the representative-receipt benchmark remain open. Production enablement remains blocked and the flag defaults off.
+
+2026-08-30 — Quota verification passes with 34/34 frontend tests and 21/21 Edge tests, plus TypeScript lint, production build, Deno check/fmt/lint, migration formatting, and `git diff --check`. In-memory contracts cover reservation ordering, personal/shared denial, quota-service failure, response headers, and consumed-count propagation after provider failure. Browser QA reconfirmed the development-only mock flow at 390×844 with no console errors. Real PostgreSQL boundary/race tests, live exhausted-state UI testing, Azure F0 concurrency/429 validation, gateway rate limiting, provider configuration, and production deployment remain open; the production feature flag remains off.
 
 ## Definition of done
 
@@ -270,6 +283,7 @@ Acceptance:
 - Parité never persistently stores the receipt image, raw OCR, items, or assignments.
 - Provider-side analysis data is deleted before success is reported when deletion is part of the selected provider contract.
 - Secrets remain server-side, receipt contents are absent from logs, and invalid users cannot spend provider quota.
+- Exhausted personal or shared quotas cannot call the provider, and quota storage contains no receipt content.
 - Lint, build, unit tests, responsive QA, failure-path QA, and privacy inspection pass.
 
 ## Out of scope

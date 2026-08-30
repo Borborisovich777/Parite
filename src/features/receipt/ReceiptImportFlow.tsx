@@ -26,9 +26,10 @@ import { MemberAvatar } from '../../components/MemberAvatar';
 import { allocateEqualMinor } from './allocation';
 import { calculateReceiptSplits } from './calculateReceiptSplits';
 import { isReceiptImportMockEnabled } from './config';
-import { extractReceipt } from './extractReceipt';
+import { extractReceipt, ReceiptExtractionError } from './extractReceipt';
 import { parseMoneyToMinor } from './money';
 import { preprocessReceiptImage } from './preprocessReceiptImage';
+import { getMyReceiptScanQuota, type ReceiptQuotaStatus } from './receiptQuota';
 import type {
   ReceiptAdjustmentAllocation,
   ReceiptAdjustmentKind,
@@ -126,6 +127,7 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
   const abortControllerRef = useRef<AbortController | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const onCloseRef = useRef(onClose);
+  const quotaRequestGenerationRef = useRef(0);
 
   const [step, setStep] = useState<ReceiptStep>('capture');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -147,6 +149,9 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
   const [customRateInput, setCustomRateInput] = useState('');
   const [splitResult, setSplitResult] = useState<Extract<ReceiptSplitResult, { ok: true }> | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
+  const [scanQuota, setScanQuota] = useState<ReceiptQuotaStatus | null>(null);
+  const [quotaClock, setQuotaClock] = useState(() => Date.now());
+  const [isQuotaRefreshPending, setIsQuotaRefreshPending] = useState(!isReceiptImportMockEnabled);
   const [previewRotation, setPreviewRotation] = useState(0);
   const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
   const [isTotalsOnlyMode, setIsTotalsOnlyMode] = useState(false);
@@ -161,6 +166,9 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
     : groupRate
       ? 'group'
       : 'custom';
+  const activeScanQuota = scanQuota && Date.parse(scanQuota.resetAt) > quotaClock ? scanQuota : null;
+  const scanUnavailable = !isReceiptImportMockEnabled && activeScanQuota?.available === false;
+  const scanControlsDisabled = scanUnavailable || isQuotaRefreshPending;
 
   const assignedMemberIds = useMemo(() => {
     const assigned = new Set(Object.values(assignments).flat());
@@ -221,7 +229,29 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
     setPreviewUrl(null);
   };
 
+  const refreshScanQuota = () => {
+    if (!isOpen || isReceiptImportMockEnabled) return;
+
+    const generation = quotaRequestGenerationRef.current + 1;
+    quotaRequestGenerationRef.current = generation;
+    setIsQuotaRefreshPending(true);
+    void getMyReceiptScanQuota()
+      .then(quota => {
+        if (quotaRequestGenerationRef.current !== generation) return;
+        setQuotaClock(Date.now());
+        setScanQuota(quota);
+        setIsQuotaRefreshPending(false);
+      })
+      .catch(() => {
+        if (quotaRequestGenerationRef.current !== generation) return;
+        setIsQuotaRefreshPending(false);
+        // The extraction endpoint enforces the quota again and fails closed.
+        // A status-read failure must not remove the existing manual fallback.
+      });
+  };
+
   const startOver = () => {
+    const wasExtracting = abortControllerRef.current !== null;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     clearPreviewUrl();
@@ -244,6 +274,7 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
     setIsTotalsOnlyMode(false);
     setFlowError(null);
     setStep('capture');
+    if (wasExtracting) refreshScanQuota();
   };
 
   useEffect(() => () => {
@@ -254,6 +285,29 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen || isReceiptImportMockEnabled) return;
+
+    setScanQuota(null);
+    setQuotaClock(Date.now());
+    refreshScanQuota();
+    return () => {
+      quotaRequestGenerationRef.current += 1;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !scanQuota) return;
+
+    const untilReset = Date.parse(scanQuota.resetAt) - quotaClock;
+    if (untilReset <= 0) return;
+    const timer = window.setTimeout(
+      () => setQuotaClock(Date.now()),
+      Math.min(untilReset + 50, 2_147_000_000),
+    );
+    return () => window.clearTimeout(timer);
+  }, [isOpen, quotaClock, scanQuota]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -436,11 +490,23 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
   };
 
   const handleFile = async (file: File) => {
+    if (scanUnavailable) {
+      setFlowError(
+        activeScanQuota?.reason === 'global_limit'
+          ? 'Receipt scanning has reached its shared monthly limit. Enter the expense manually instead.'
+          : `You have used all ${activeScanQuota?.limit ?? 10} receipt scans for this month. Enter the expense manually instead.`,
+      );
+      return;
+    }
+    if (isQuotaRefreshPending) return;
+    quotaRequestGenerationRef.current += 1;
+    setIsQuotaRefreshPending(false);
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setFlowError(null);
     setStep('extracting');
+    let extractionStarted = false;
 
     try {
       const prepared = await preprocessReceiptImage(file, controller.signal);
@@ -449,10 +515,24 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
       previewUrlRef.current = nextPreviewUrl;
       setPreviewUrl(nextPreviewUrl);
 
-      const receipt = await extractReceipt({ tripId, image: prepared, signal: controller.signal });
-      applyExtraction(receipt);
+      extractionStarted = true;
+      const extraction = await extractReceipt({ tripId, image: prepared, signal: controller.signal });
+      if (extraction.quota) {
+        setQuotaClock(Date.now());
+        setScanQuota(extraction.quota);
+      }
+      setIsQuotaRefreshPending(false);
+      applyExtraction(extraction.receipt);
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (error instanceof ReceiptExtractionError && error.quota) {
+        setQuotaClock(Date.now());
+        setScanQuota(error.quota);
+        setIsQuotaRefreshPending(false);
+      } else if (extractionStarted) {
+        setScanQuota(null);
+        refreshScanQuota();
+      }
       clearPreviewUrl();
       setFlowError(errorMessage(error, 'The receipt could not be prepared.'));
       setStep('capture');
@@ -735,6 +815,33 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
             {step === 'extracting' ? 'Reading receipt.' : `${stepTitle}. ${flowError ?? ''}`}
           </div>
 
+          {!isReceiptImportMockEnabled && isQuotaRefreshPending && step === 'capture' && (
+            <div role="status" className="flex items-center gap-2 rounded-2xl border border-black/10 bg-white p-3 text-xs font-semibold text-slate-600">
+              <LoaderCircle className="h-4 w-4 animate-spin text-[#2f7d66]" />
+              Checking receipt scan availability…
+            </div>
+          )}
+
+          {!isReceiptImportMockEnabled && activeScanQuota && !isQuotaRefreshPending && (
+            <div
+              role="status"
+              className={`flex items-start gap-2 rounded-2xl border p-3 text-xs ${
+                scanUnavailable
+                  ? 'border-amber-300 bg-amber-50 text-amber-950'
+                  : 'border-[#81b29a]/50 bg-[#eef8f3] text-[#245f4e]'
+              }`}
+            >
+              <ScanLine className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="font-semibold">
+                {activeScanQuota.reason === 'global_limit'
+                  ? 'Receipt scanning has reached this month\'s shared capacity. Manual entry is still available.'
+                  : `${activeScanQuota.remaining} of ${activeScanQuota.limit} receipt scans left this month.${
+                    activeScanQuota.remaining === 0 ? ' Manual entry is still available.' : ''
+                  }`}
+              </span>
+            </div>
+          )}
+
           {step === 'capture' && (
             <section className="rounded-[28px] border border-black/10 bg-white p-5 text-center shadow-sm">
               {isReceiptImportMockEnabled && (
@@ -758,16 +865,18 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
+                  disabled={scanControlsDisabled}
                   onClick={() => cameraInputRef.current?.click()}
-                  className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[#81b29a] px-4 text-sm font-bold text-[#16372b]"
+                  className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[#81b29a] px-4 text-sm font-bold text-[#16372b] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Camera className="h-5 w-5" />
                   Take or choose photo
                 </button>
                 <button
                   type="button"
+                  disabled={scanControlsDisabled}
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 text-sm font-bold text-slate-700"
+                  className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload className="h-5 w-5" />
                   Browse files
@@ -780,11 +889,21 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
               >
                 Skip extraction and enter a total only
               </button>
+              {scanUnavailable && (
+                <button
+                  type="button"
+                  onClick={closeFlow}
+                  className="mt-3 min-h-11 w-full rounded-2xl border border-[#81b29a]/60 bg-[#eef8f3] px-4 text-xs font-bold text-[#245f4e]"
+                >
+                  Enter expense manually
+                </button>
+              )}
               <input
                 ref={cameraInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 capture="environment"
+                disabled={scanControlsDisabled}
                 className="sr-only"
                 aria-label="Take a receipt photo"
                 onChange={event => {
@@ -797,6 +916,7 @@ export const ReceiptImportFlow: React.FC<ReceiptImportFlowProps> = ({
                 ref={fileInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
+                disabled={scanControlsDisabled}
                 className="sr-only"
                 aria-label="Choose a receipt image file"
                 onChange={event => {
