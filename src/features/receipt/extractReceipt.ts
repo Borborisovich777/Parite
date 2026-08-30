@@ -2,12 +2,34 @@ import { requireSupabase } from '../../lib/supabase';
 import type { ReceiptExtractionResult } from './types';
 import type { PreparedReceiptImage } from './preprocessReceiptImage';
 import { isReceiptImportMockEnabled } from './config';
+import {
+  parseReceiptQuotaHeaders,
+  parseReceiptQuotaForResponse,
+  type ReceiptQuotaStatus,
+} from './receiptQuota';
 import { parseReceiptExtractionResult } from './validation';
 
 interface ExtractReceiptInput {
   tripId: string;
   image: PreparedReceiptImage;
   signal?: AbortSignal;
+}
+
+export interface ExtractReceiptResult {
+  receipt: ReceiptExtractionResult;
+  quota?: ReceiptQuotaStatus;
+}
+
+export class ReceiptExtractionError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string | null,
+    public readonly quota?: ReceiptQuotaStatus,
+  ) {
+    super(message);
+    this.name = 'ReceiptExtractionError';
+  }
 }
 
 const MAX_EXTRACTION_RESPONSE_BYTES = 512 * 1024;
@@ -98,14 +120,20 @@ const getErrorMessage = (value: unknown) => {
   return typeof message === 'string' && message.trim() ? message.trim() : null;
 };
 
+const getErrorCode = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const code = (value as { code?: unknown }).code;
+  return typeof code === 'string' && /^[a-z_]{1,64}$/.test(code) ? code : null;
+};
+
 export async function extractReceipt({
   tripId,
   image,
   signal,
-}: ExtractReceiptInput): Promise<ReceiptExtractionResult> {
+}: ExtractReceiptInput): Promise<ExtractReceiptResult> {
   if (isReceiptImportMockEnabled) {
     await waitForMock(signal);
-    return mockReceipt();
+    return { receipt: mockReceipt() };
   }
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
@@ -143,7 +171,14 @@ export async function extractReceipt({
   }
 
   if (!response.ok) {
-    throw new Error(getErrorMessage(payload) ?? 'The receipt could not be read. Try again or enter it manually.');
+    const code = getErrorCode(payload);
+    const quota = parseReceiptQuotaForResponse(response.headers, code) ?? undefined;
+    throw new ReceiptExtractionError(
+      getErrorMessage(payload) ?? 'The receipt could not be read. Try again or enter it manually.',
+      response.status,
+      code,
+      quota,
+    );
   }
 
   const parsed = parseReceiptExtractionResult(payload);
@@ -151,5 +186,8 @@ export async function extractReceipt({
     throw new Error('The receipt result was incomplete. Try again or enter it manually.');
   }
 
-  return parsed.value;
+  return {
+    receipt: parsed.value,
+    quota: parseReceiptQuotaHeaders(response.headers) ?? undefined,
+  };
 }
