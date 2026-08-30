@@ -134,6 +134,30 @@ Provider processing must be described precisely. "Not saved on the backend" can 
 
 The key optimization is to keep Parité out of the expensive path. The browser performs one resize; the function streams or forwards bytes and handles a small JSON response; the specialized provider does extraction; the browser performs all item assignment and integer-cent arithmetic. No queue, database draft, image transformation server, or AI reasoning loop is needed.
 
+### Free-tier guardrails (30 August 2026)
+
+Azure currently documents 500 free pages per month for Document Intelligence F0. Because this MVP accepts one
+single-image receipt per extraction, Parité can reserve up to 450 app-initiated attempts per UTC month and leave
+50 pages of headroom for validation, retries, or calls outside the normal UI. Each approved user receives up to
+10 attempts per UTC month, so shared capacity is equivalent to 45 full personal allowances. An attempt counts
+once it passes authentication, image validation, membership, and configuration
+checks and is about to call Azure; ambiguous provider failures are not refunded.
+
+The durable quota data is not receipt data. It contains only a user ID, UTC month, and count. The
+browser can read only its own count and whether shared capacity is available; it cannot read the global count or
+reserve quota directly. These controls protect the app's free allowance, but they do not change Azure's pricing
+or guarantee that every image is free if the resource is used elsewhere or Azure changes its terms.
+
+F0 also currently documents one Analyze request per second and one result GET request per second for the whole
+resource. A 1,100 ms polling floor keeps one extraction job below the result-GET rate, but concurrent stateless
+requests can still collide. Resource-wide concurrency and 429 handling remain a live rollout test rather than a
+claim that the monthly counters alone make F0 throughput-safe.
+
+The monthly counters protect provider attempts rather than all Edge traffic. The normal browser checks status
+before selecting an image, but a custom client could repeatedly submit invalid or unauthorized request bodies
+that never reach reservation. A gateway-level per-user request limit remains a production rollout requirement
+to bound that bandwidth and memory burden without counting a user's malformed photo as an Azure attempt.
+
 ### Workspace Agents
 
 Workspace Agents are not suitable as the core extraction path today:
@@ -153,6 +177,7 @@ A Workspace Agent could later review failed imports or open an internal exceptio
 - Configure logs and error reporting to exclude request bodies, raw OCR, card fragments, loyalty IDs, addresses, and other receipt content.
 - Delete the provider's analysis result immediately when supported, and document any unavoidable provider-side transient retention.
 - Rate-limit extraction and add per-account quotas because provider calls are a paid abuse surface.
+- Keep the provider's own account quota and alerts enabled; application counters cannot see calls made outside Parité.
 - Treat all receipt text as untrusted data. Printed text must never become model or tool instructions, and the extraction process must have no expense-writing capability.
 - Log only provider, parser version, duration, byte-size bucket, failure category, and reconciliation outcome.
 - Allow one in-flight scan per user, use a short timeout, and always preserve manual entry as the fallback.
@@ -201,6 +226,7 @@ If OpenAI is tested as a fallback, `store: false` prevents Responses application
 | Rounding or conversion drift | Splits fail server validation | Integer minor units, server recomputation, invariant tests |
 | Large existing expense component | Slow, fragile implementation | Separate capture, review, and assignment components |
 | No existing automated test suite | Regression risk | Add arithmetic, RPC, RLS, extraction-contract, and browser-flow tests |
+| Free-tier or throughput exhaustion | Scan attempts fail or incur cost | Enforce 10/user and 450/shared UTC-month caps, retain 50-page headroom, and test resource-wide F0 throttling before launch |
 
 ## Effort and rollout
 
@@ -260,6 +286,6 @@ Proceed in this order:
 - OpenAI: [image inputs](https://developers.openai.com/api/docs/guides/images-vision), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create), [data controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint), and [models](https://developers.openai.com/api/docs/models)
 - Workspace Agents: [trigger runs](https://developers.openai.com/workspace-agents/trigger-runs) and [authentication](https://developers.openai.com/workspace-agents/authentication)
 - Supabase: [secured Edge Functions](https://supabase.com/docs/guides/functions/auth)
-- Azure: [prebuilt receipt model](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/receipt?view=doc-intel-4.0.0), [data privacy](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/document-intelligence/data-privacy-security), and [delete analysis result](https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/delete-analyze-result?view=rest-aiservices-v4.0+%282024-11-30%29)
+- Azure: [prebuilt receipt model](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/receipt?view=doc-intel-4.0.0), [pricing](https://azure.microsoft.com/en-us/pricing/details/document-intelligence/), [service limits](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/service-limits?view=doc-intel-4.0.0), [data privacy](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/document-intelligence/data-privacy-security), and [delete analysis result](https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/delete-analyze-result?view=rest-aiservices-v4.0+%282024-11-30%29)
 - AWS: [AnalyzeExpense](https://docs.aws.amazon.com/textract/latest/APIReference/API_AnalyzeExpense.html), [synchronous processing](https://docs.aws.amazon.com/textract/latest/dg/sync.html), [receipt fields](https://docs.aws.amazon.com/textract/latest/dg/invoices-receipts.html), and [pricing](https://aws.amazon.com/textract/pricing/)
 - Google: [Expense Parser](https://docs.cloud.google.com/document-ai/docs/processors-list), [security and retention](https://docs.cloud.google.com/document-ai/docs/security), and [pricing](https://cloud.google.com/products/document-ai/pricing)

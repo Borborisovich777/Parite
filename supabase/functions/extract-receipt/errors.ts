@@ -11,6 +11,8 @@ export type SafeErrorCode =
   | 'extraction_failed'
   | 'malformed_extraction'
   | 'privacy_cleanup_failed'
+  | 'receipt_quota_exceeded'
+  | 'receipt_capacity_reached'
   | 'method_not_allowed';
 
 export class SafeHttpError extends Error {

@@ -20,6 +20,7 @@ Parité is a mobile-first trip expense splitting app built with React, Vite, Typ
 - Per-member display currency preference for read-only display conversion.
 - Expenses, balances, and settlements CSV export.
 - Full-width app-level error banner for blocking action errors.
+- Feature-flagged, stateless receipt scanning with editable item assignment and exact custom splits.
 
 ## Prerequisites
 
@@ -99,6 +100,7 @@ If your Supabase project already has the earlier Parité schema, run these incre
 8. `supabase/migrations/202606110003_phase53_usd_currency.sql`
 9. `supabase/migrations/202607170001_account_approval.sql`
 10. `supabase/migrations/202607170002_voided_settlement_expense_guard.sql`
+11. `supabase/migrations/202608300001_receipt_scan_quota.sql`
 
 Each patch is intended to be pasted into the Supabase SQL Editor and run once. Most DDL is idempotent where practical. After the final patch, run:
 
@@ -138,6 +140,25 @@ The current app expects these public RPCs to exist:
 - `delete_expense`
 - `mark_settlement_paid`
 - `void_settlement`
+- `get_my_receipt_scan_quota`
+
+`reserve_receipt_scan` is a service-role-only RPC used by the receipt Edge Function. It must not be granted to
+browser roles.
+
+### Optional Receipt Import
+
+Receipt import remains off when `VITE_RECEIPT_IMPORT_ENABLED` is absent. For local interface testing, use the
+explicit development-only mock; it shows fixed sample rows and does not scan the selected image:
+
+```bash
+VITE_RECEIPT_IMPORT_ENABLED=true VITE_RECEIPT_IMPORT_MOCK=true npm run dev
+```
+
+For live extraction, set `VITE_RECEIPT_IMPORT_ENABLED=true` in the frontend and leave
+`VITE_RECEIPT_IMPORT_MOCK` absent or false. Apply the receipt quota migration first, configure and deploy the
+`extract-receipt` Edge Function, and keep Azure plus Supabase service-role secrets only in Supabase Function
+Secrets. See [`supabase/functions/extract-receipt/README.md`](supabase/functions/extract-receipt/README.md) for
+the provider gate, quota semantics, environment variables, privacy constraints, and verification steps.
 
 You can inspect installed functions with:
 
