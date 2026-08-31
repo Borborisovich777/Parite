@@ -34,6 +34,8 @@ import {
   isSupabaseConfigured,
   listPendingAccountAccess,
   rejectAccount,
+  sendPasswordResetEmail,
+  setRecoveredPassword,
   signInWithEmail,
   signOut,
   signUpWithEmail,
@@ -111,9 +113,12 @@ function PariteApp() {
   const [isGuidedTourOpen, setIsGuidedTourOpen] = useState(false);
   const [guidedTourUserId, setGuidedTourUserId] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<User | null>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryPasswordConfirmation, setRecoveryPasswordConfirmation] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
@@ -511,7 +516,12 @@ function PariteApp() {
 
     bootstrap();
 
-    const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase?.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+        setAuthError(null);
+        setAuthMessage(null);
+      }
       setAuthUser(session?.user ?? null);
       setIsAccountAccessLoading(Boolean(session?.user));
     }) ?? { data: { subscription: null } };
@@ -668,13 +678,20 @@ function PariteApp() {
       return;
     }
 
-    if (authPassword.length < 6) {
+    if (authMode !== 'forgot' && authPassword.length < 6) {
       setAuthError('Password must be at least 6 characters');
       return;
     }
 
     setIsAuthSubmitting(true);
     try {
+      if (authMode === 'forgot') {
+        const redirectTo = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+        await sendPasswordResetEmail(authEmail.trim(), redirectTo);
+        setAuthMessage('If an account exists for that email, a password reset link is on its way.');
+        return;
+      }
+
       const user = authMode === 'signup'
         ? await signUpWithEmail(
           authEmail.trim(),
@@ -696,6 +713,36 @@ function PariteApp() {
     } catch (error) {
       console.error(error);
       setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  };
+
+  const handleRecoveredPasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthError(null);
+    setAuthMessage(null);
+
+    if (recoveryPassword.length < 8) {
+      setAuthError('Use at least 8 characters for the new password.');
+      return;
+    }
+    if (recoveryPassword !== recoveryPasswordConfirmation) {
+      setAuthError('The new password confirmation does not match.');
+      return;
+    }
+
+    setIsAuthSubmitting(true);
+    try {
+      const user = await setRecoveredPassword(recoveryPassword);
+      setAuthUser(user);
+      setRecoveryPassword('');
+      setRecoveryPasswordConfirmation('');
+      setIsPasswordRecovery(false);
+      setAuthMessage(null);
+    } catch (error) {
+      console.error(error);
+      setAuthError(error instanceof Error ? error.message : 'Could not update the password.');
     } finally {
       setIsAuthSubmitting(false);
     }
@@ -913,14 +960,8 @@ function PariteApp() {
     };
   };
 
-  const handleChangeAccountPassword = async (
-    currentPassword: string,
-    nextPassword: string,
-  ): Promise<void> => {
-    const currentEmail = authUser?.email;
-    if (!currentEmail) throw new Error('This account does not have an email address for verification.');
-
-    const updatedUser = await changeAccountPassword(currentEmail, currentPassword, nextPassword);
+  const handleChangeAccountPassword = async (nextPassword: string): Promise<void> => {
+    const updatedUser = await changeAccountPassword(nextPassword);
     setAuthUser(updatedUser);
   };
 
@@ -1535,7 +1576,9 @@ function PariteApp() {
               Parité account
             </p>
             <h2 id="auth-card-title" className="text-xl font-bold font-display text-white tracking-tight mt-1">
-              {joinEntrySource === 'link'
+              {authMode === 'forgot'
+                ? 'Reset your password'
+                : joinEntrySource === 'link'
                 ? authMode === 'signup'
                   ? 'Create an account to join'
                   : 'Log in to request access'
@@ -1544,13 +1587,28 @@ function PariteApp() {
                   : 'Log in to continue'}
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-2 leading-relaxed">
-              {authMode === 'signup'
+              {authMode === 'forgot'
+                ? 'Enter your account email. We will send a secure link that lets you choose a new password.'
+                : authMode === 'signup'
                 ? 'New accounts can sign up now and will be reviewed by an admin before access is enabled.'
                 : 'Sign in to keep your group access across browsers and devices.'}
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5 bg-[#121418] border border-slate-800 p-1 rounded-2xl">
+          {authMode === 'forgot' ? (
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError(null);
+                setAuthMessage(null);
+              }}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-[#121418] text-xs font-bold text-slate-300 hover:text-white"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to login
+            </button>
+          ) : <div className="grid grid-cols-2 gap-1.5 bg-[#121418] border border-slate-800 p-1 rounded-2xl">
             <button
               type="button"
               id="tab-auth-login"
@@ -1581,7 +1639,7 @@ function PariteApp() {
             >
               Sign up
             </button>
-          </div>
+          </div>}
 
           {authError && (
             <div
@@ -1624,7 +1682,7 @@ function PariteApp() {
               />
             </div>
 
-            <div>
+            {authMode !== 'forgot' && <div>
               <label htmlFor="input-auth-password" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                 Password *
               </label>
@@ -1640,7 +1698,21 @@ function PariteApp() {
                 aria-describedby={authFeedbackId}
                 className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
               />
-            </div>
+              {authMode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('forgot');
+                    setAuthPassword('');
+                    setAuthError(null);
+                    setAuthMessage(null);
+                  }}
+                  className="mt-2 text-[11px] font-bold text-indigo-300 hover:text-indigo-200"
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>}
           </div>
 
           <button
@@ -1649,7 +1721,87 @@ function PariteApp() {
             disabled={isAuthSubmitting}
             className="w-full bg-indigo-600 disabled:opacity-60 text-slate-950 font-bold py-3 px-4 rounded-xl text-xs transition-colors mt-1.5 cursor-pointer"
           >
-            {isAuthSubmitting ? 'Please wait...' : authMode === 'signup' ? 'Create Account' : 'Log In'}
+            {isAuthSubmitting
+              ? 'Please wait...'
+              : authMode === 'forgot'
+                ? 'Email password reset link'
+                : authMode === 'signup'
+                  ? 'Create Account'
+                  : 'Log In'}
+          </button>
+        </form>
+      </section>
+    );
+  };
+
+  const renderPasswordRecoveryCard = () => {
+    const authFeedbackId = authError ? 'recovery-error-message' : undefined;
+
+    return (
+      <section className="w-full max-w-md rounded-3xl border border-slate-800 bg-[#1a1d23] p-5 shadow-2xl">
+        <div className="border-b border-slate-800 pb-4">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-300">
+            <KeyRound className="h-5 w-5" />
+          </span>
+          <p className="mt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300">
+            Email verified
+          </p>
+          <h1 className="mt-1 font-display text-2xl font-bold text-white">Choose a new password</h1>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            Your reset link is valid. Set a new password for {authUser?.email ?? 'your account'}.
+          </p>
+        </div>
+
+        <form onSubmit={handleRecoveredPasswordSubmit} aria-describedby={authFeedbackId} className="mt-4 space-y-4">
+          {authError && (
+            <div
+              id="recovery-error-message"
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-rose-900/30 bg-rose-950/40 p-2.5 text-[11px] leading-snug text-rose-300"
+            >
+              <AlertOctagon className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="input-recovery-password" className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              New password
+            </label>
+            <input
+              id="input-recovery-password"
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              value={recoveryPassword}
+              onChange={event => setRecoveryPassword(event.target.value)}
+              className="w-full rounded-xl border border-slate-800 bg-[#121418] px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="input-recovery-password-confirmation" className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Confirm new password
+            </label>
+            <input
+              id="input-recovery-password-confirmation"
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              value={recoveryPasswordConfirmation}
+              onChange={event => setRecoveryPasswordConfirmation(event.target.value)}
+              className="w-full rounded-xl border border-slate-800 bg-[#121418] px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isAuthSubmitting}
+            className="min-h-12 w-full rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white disabled:opacity-60"
+          >
+            {isAuthSubmitting ? 'Updating password...' : 'Set new password'}
           </button>
         </form>
       </section>
@@ -1885,6 +2037,16 @@ function PariteApp() {
       </div>
     </div>
   );
+
+  if (isSupabaseConfigured && !isBootstrapping && isPasswordRecovery) {
+    return (
+      <div className="min-h-[100dvh] bg-[var(--color-page-background)] px-4 py-8 font-sans sm:py-14">
+        <main className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full items-center justify-center">
+          {renderPasswordRecoveryCard()}
+        </main>
+      </div>
+    );
+  }
 
   if (isSupabaseConfigured && !isBootstrapping && !authUser) {
     if (joinEntrySource === 'link' && inviteInput) {
