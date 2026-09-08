@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+node scripts/check-public-files.mjs
+if command -v gitleaks >/dev/null 2>&1; then
+  scanner=gitleaks
+elif [ -x .security-tools/gitleaks ]; then
+  scanner=.security-tools/gitleaks
+else
+  echo 'Install Gitleaks before committing (macOS: brew install gitleaks).' >&2
+  exit 1
+fi
+"$scanner" git --pre-commit --staged --redact --no-banner .

@@ -10,6 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test src/features/receipt/*.test.ts",
+    "security:files": "node scripts/check-public-files.mjs",
+    "security:secrets": "gitleaks git --redact --no-banner --log-opts=--all .",
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {

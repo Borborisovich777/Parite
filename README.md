@@ -101,6 +101,7 @@ If your Supabase project already has the earlier Parité schema, run these incre
 9. `supabase/migrations/202607170001_account_approval.sql`
 10. `supabase/migrations/202607170002_voided_settlement_expense_guard.sql`
 11. `supabase/migrations/202608300001_receipt_scan_quota.sql`
+12. `supabase/migrations/202609080001_private_balance_helpers.sql`
 
 Each patch is intended to be pasted into the Supabase SQL Editor and run once. Most DDL is idempotent where practical. After the final patch, run:
 
@@ -247,6 +248,9 @@ For compatibility, a legacy `tripbalance_active_member_id` value is copied once 
 
 ## Security Notes
 
+- See [SECURITY.md](SECURITY.md) for public-repository checks and incident cleanup.
+- Keep screenshots, receipt photos, browser sessions, and financial exports out of Git.
+- Apply migration `202609080001_private_balance_helpers.sql` to remove direct browser access to internal balance and group-statistic helpers.
 - The frontend uses only the Supabase anon key.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` in Vite, Vercel, browser code, logs, or screenshots.
 - Do not commit `.env.local`.

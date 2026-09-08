@@ -2,8 +2,9 @@
 
 ## Source visual truth
 
-- Expense viewport issue: `/var/folders/p5/3lk7_p691q3dpbz7ztx_bpfc0000gp/T/codex-clipboard-50834610-6dbe-4388-81d8-546ab8e9c6a4.png`
-- Groups menu issue: `/var/folders/p5/3lk7_p691q3dpbz7ztx_bpfc0000gp/T/codex-clipboard-41276cbf-18a3-40db-9c89-e9fd071b58f3.png`
+- Expense viewport and Groups menu references were supplied privately.
+- QA images under `artifacts/` are local-only evidence. Some comparisons include
+  private reference data, so the images must not be committed or published.
 
 The intended result keeps the established Parité visual system while removing the unused band above mobile navigation, consolidating group actions, limiting a long group list to three rows by default, removing the duplicate Switch group control, and placing Export immediately before Log out.
 
