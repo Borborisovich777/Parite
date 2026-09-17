@@ -47,6 +47,7 @@ import {
   cancelTripClosure,
   claimLegacyMember,
   createExpenseWithSplits,
+  updateExpenseMetadata,
   createTripWithAdmin,
   deleteExpense,
   demoteAdmin,
@@ -159,6 +160,7 @@ function PariteApp() {
   const [createTripError, setCreateTripError] = useState<string | null>(null);
 
   const [selectedExpenseIdForDetail, setSelectedExpenseIdForDetail] = useState<string | null>(null);
+  const [settlementHistoryTarget, setSettlementHistoryTarget] = useState<string | null>(null);
   const [selectedBreakdownMemberId, setSelectedBreakdownMemberId] = useState<string | null>(null);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [lastRenderedTripId, setLastRenderedTripId] = useState<string | null>(null);
@@ -878,7 +880,8 @@ function PariteApp() {
     setIsMemberDataRefreshing(true);
     setActionError(null);
     try {
-      await refreshMemberManagementData(currentMember.id, accountAccess?.role === 'admin');
+      if (currentMember.status === 'pending') applyWorkspace(await loadAuthWorkspace(currentMember.id));
+      else await refreshMemberManagementData(currentMember.id, accountAccess?.role === 'admin');
     } catch (error) {
       console.error(error);
       setActionErrorFromUnknown(error, 'Could not refresh member requests.');
@@ -972,10 +975,12 @@ function PariteApp() {
 
     if (!newTripName.trim()) {
       setCreateTripError('Group name is required');
+      document.getElementById('input-create-trip-name')?.focus();
       return;
     }
     if (!newTripAdminName.trim()) {
-      setCreateTripError('Admin display name is required');
+      setCreateTripError('Your display name is required');
+      document.getElementById('input-create-admin-name')?.focus();
       return;
     }
 
@@ -1341,7 +1346,7 @@ function PariteApp() {
       await rememberAdminExchangeRate(currency, exchangeRate);
     } catch (error) {
       console.error(error);
-      setActionErrorFromUnknown(error, 'Could not save expense.');
+      // The active expense form owns this error and retains its draft.
       throw error;
     }
   };
@@ -1378,7 +1383,7 @@ function PariteApp() {
       await rememberAdminExchangeRate(currency, exchangeRate);
     } catch (error) {
       console.error(error);
-      setActionErrorFromUnknown(error, 'Could not update expense.');
+      // The active expense form owns this error and retains its draft.
       throw error;
     }
   };
@@ -1391,7 +1396,7 @@ function PariteApp() {
       setActionError(null);
     } catch (error) {
       console.error(error);
-      setActionErrorFromUnknown(error, 'Could not delete expense.');
+      // The active expense form owns this error and retains its draft.
       throw error;
     }
   };
@@ -2189,6 +2194,8 @@ function PariteApp() {
             )}
             {currentMember?.status === 'approved' && activeTrip && (
               <MemberBreakdownSheet
+                onOpenExpense={id => { setSelectedBreakdownMemberId(null); setSelectedExpenseIdForDetail(id); setActiveTab('expenses'); }}
+                onOpenSettlement={id => { setSelectedBreakdownMemberId(null); setSettlementHistoryTarget(id); setActiveTab('balances'); }}
                 isOpen={Boolean(selectedBreakdownMember)}
                 onClose={() => setSelectedBreakdownMemberId(null)}
                 member={selectedBreakdownMember}
@@ -2282,7 +2289,7 @@ function PariteApp() {
 
               {renderAccountStrip()}
 
-              {createTripError && (
+              {createTripError && !['Group name is required', 'Your display name is required'].includes(createTripError) && (
                 <div className="bg-rose-950/40 border border-rose-900/30 text-rose-300 p-2.5 rounded-xl text-xs flex items-start gap-1">
                   <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{createTripError}</span>
@@ -2291,42 +2298,44 @@ function PariteApp() {
 
               <form onSubmit={handleCreateTripSubmit} className="bg-[#1a1d23] border border-slate-800/60 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  <label htmlFor="input-create-trip-name" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                     Group Name *
                   </label>
                   <input
                     type="text"
                     required
-                    id="input-create-trip-name"
+                    id="input-create-trip-name" aria-invalid={createTripError === "Group name is required"} aria-describedby="input-create-trip-name-error"
                     value={newTripName}
-                    onChange={event => setNewTripName(event.target.value)}
+                    onChange={event => { setNewTripName(event.target.value); if (event.target.value.trim()) setCreateTripError(null); }}
                     placeholder="e.g. Zaysan Group"
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
+                  {createTripError === "Group name is required" && <p id="input-create-trip-name-error" role="alert" className="mt-2 text-xs text-[var(--color-negative)]">{createTripError}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  <label htmlFor="input-create-admin-name" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                     Your Display Name *
                   </label>
                   <input
                     type="text"
                     required
-                    id="input-create-admin-name"
+                    id="input-create-admin-name" aria-invalid={createTripError === "Your display name is required"} aria-describedby="input-create-admin-name-error"
                     value={newTripAdminName}
-                    onChange={event => setNewTripAdminName(event.target.value)}
+                    onChange={event => { setNewTripAdminName(event.target.value); if (event.target.value.trim()) setCreateTripError(null); }}
                     placeholder="e.g. Qotaqbas"
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
                   />
+                  {createTripError === "Your display name is required" && <p id="input-create-admin-name-error" role="alert" className="mt-2 text-xs text-[var(--color-negative)]">{createTripError}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  <label htmlFor="select-create-base-currency" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                     Base Currency *
                   </label>
                   <select
                     value={newTripBaseCurrency}
-                    id="select-create-base-currency"
+                    id="select-create-base-currency" aria-describedby="create-currency-help"
                     onChange={event => setNewTripBaseCurrency(event.target.value as Currency)}
                     className="w-full bg-[#121418] border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-200 focus:border-indigo-500 focus:outline-none"
                   >
@@ -2336,7 +2345,7 @@ function PariteApp() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                  <p id="create-currency-help" className="text-[11px] text-slate-500 mt-2 leading-relaxed">
                     Group base currency is used for calculations. You can still view your personal amounts in another currency later.
                   </p>
                 </div>
@@ -2360,9 +2369,11 @@ function PariteApp() {
               <div>
                 <h1 className="text-lg font-bold text-white font-display">Access pending</h1>
                 <p id="pending-screen-msg" className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
-                  Your request as <strong>{currentMember.display_name}</strong> is waiting for admin approval.
+                  Your request as <strong>{currentMember.display_name}</strong> to join <strong>{activeTrip?.name ?? workspaces.find(item => item.member_id === currentMember.id)?.trip_name ?? 'your requested group'}</strong> is waiting for approval from {tripMembers.filter(member => member.role === 'admin' && member.status === 'approved').map(member => member.display_name).join(', ') || 'a group administrator'}.
+                  <span className="mt-2 block">Choose Check approval to refresh your access status.</span>
                 </p>
               </div>
+              <button type="button" onClick={handleRefreshMembers} disabled={isMemberDataRefreshing} className="min-h-11 rounded-xl bg-[var(--color-positive)] px-5 text-sm font-bold text-white">{isMemberDataRefreshing ? 'Checking…' : 'Check approval'}</button>
               {renderAccountStrip()}
               <button
                 type="button"
@@ -2513,13 +2524,14 @@ function PariteApp() {
                           members={tripMembers}
                           onCreateExpense={handleCreateExpense}
                           onUpdateExpense={handleUpdateExpense}
+                          onUpdateExpenseMetadata={async (id, title, date, notes) => { applyWorkspace(await updateExpenseMetadata(id, title, date, notes)); setActionError(null); }}
+                          onOpenSettlement={id => { setSelectedExpenseIdForDetail(null); setSettlementHistoryTarget(id); setActiveTab('balances'); }}
                           onDeleteExpense={handleDeleteExpense}
                           selectedExpenseIdForDetail={selectedExpenseIdForDetail}
                           onSetSelectedExpenseId={setSelectedExpenseIdForDetail}
                           isAddingExpense={isAddingExpense}
                           onSetAddingExpense={setIsAddingExpense}
                           isReadOnly={!isTripActive}
-                          onActionError={setActionError}
                         />
                       </div>
                       <div className="no-scrollbar hidden shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-white/45 px-4 py-5 xl:block">
@@ -2550,6 +2562,8 @@ function PariteApp() {
 
                 {activeTab === 'balances' && (
                   <BalancesTab
+                    historyTarget={settlementHistoryTarget}
+                    onHistoryTargetShown={() => setSettlementHistoryTarget(null)}
                     trip={activeTrip}
                     currentMember={currentMember}
                     expenses={tripExpenses}

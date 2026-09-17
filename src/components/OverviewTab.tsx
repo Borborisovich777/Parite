@@ -160,6 +160,18 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
       : `${firstRecommendation.from_display_name} pays you`
     : '';
 
+  if (expenses.length === 0 && !isReadOnly) return (
+    <div className="mx-auto w-full max-w-3xl p-5">
+      <h1 className="font-display text-2xl font-bold">Welcome to {trip.name}</h1>
+      <p className="mt-2 text-sm text-[var(--color-muted)]">Share your first cost in three simple steps.</p>
+      <ol className="mt-5 flex flex-col gap-3">
+        <li><button type="button" onClick={onManageMembers} className="parite-card w-full p-4 text-left"><strong>1. Invite someone</strong><span className="mt-1 block text-xs">{pendingRequestsCount > 0 ? `${pendingRequestsCount} pending · Review requests` : 'Share a link or invite code from Members'}</span></button></li>
+        <li><button type="button" onClick={onAddExpense} className="parite-card w-full p-4 text-left"><strong>2. Add an expense</strong><span className="mt-1 block text-xs">Choose who paid and everyone’s share</span></button></li>
+        <li><button type="button" onClick={onReviewBalances} className="parite-card w-full p-4 text-left"><strong>3. Review balances</strong><span className="mt-1 block text-xs">See who owes whom and record repayments</span></button></li>
+      </ol>
+    </div>
+  );
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 pb-24 pt-5 animate-fade-in md:px-6 md:pb-6 lg:px-8">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">

@@ -1,5 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Modal } from './Modal';
+import { localDateKey, isValidExpenseDate, formatExpenseDate, blockingSettlements, splitAllocationMessage } from '../lib/expenseEditing';
 import { Trip, Member, Expense, ExpenseSplit, Currency, ExchangeRate, Settlement, ExpenseFeeInput, ExpenseSplitInput, SUPPORTED_CURRENCIES } from '../types';
 import {
   calculateConvertedAmount,
@@ -79,13 +81,14 @@ interface ExpensesTabProps {
     splitsList: ExpenseSplitInput[],
     feeInput?: ExpenseFeeInput | null
   ) => void | Promise<void>;
+  onUpdateExpenseMetadata: (id: string, title: string, date: string, notes: string) => void | Promise<void>;
+  onOpenSettlement: (id: string) => void;
   onDeleteExpense: (expenseId: string) => void | Promise<void>;
   selectedExpenseIdForDetail: string | null;
   onSetSelectedExpenseId: (id: string | null) => void;
   isAddingExpense: boolean;
   onSetAddingExpense: (val: boolean) => void;
   isReadOnly?: boolean;
-  onActionError?: (message: string) => void;
 }
 
 type FormStep = 'basic' | 'preview';
@@ -131,12 +134,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   onCreateExpense,
   onUpdateExpense,
   onDeleteExpense,
+  onUpdateExpenseMetadata,
+  onOpenSettlement,
   selectedExpenseIdForDetail,
   onSetSelectedExpenseId,
   isAddingExpense,
   onSetAddingExpense,
   isReadOnly = false,
-  onActionError,
 }) => {
   const approvedMembers = members.filter(m => m.status === 'approved');
   const tripBaseCurrency = trip?.base_currency ?? 'CNY';
@@ -166,7 +170,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   const [useCustomExchangeRate, setUseCustomExchangeRate] = useState(false);
   const [customExchangeRateInput, setCustomExchangeRateInput] = useState('');
   const [formPayer, setFormPayer] = useState(currentMember.id);
-  const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
+  const [formDate, setFormDate] = useState(localDateKey());
   const [formParticipants, setFormParticipants] = useState<string[]>(approvedMembers.map(m => m.id));
   const [formSplitMethod, setFormSplitMethod] = useState<'equal' | 'custom'>('equal');
   const [formCustomSplits, setFormCustomSplits] = useState<Record<string, string>>({});
@@ -180,11 +184,34 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const setBlockingError = (message: string) => {
     setFormError(message);
-    onActionError?.(message);
   };
 
-  const setValidationError = (message: string) => {
-    setBlockingError(message);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const financialSnapshot = useRef('');
+  const financialState = JSON.stringify([formAmount, isServiceFeeEnabled, feePercentInput, feeLabelInput, formCurrency, useCustomExchangeRate, customExchangeRateInput, formPayer, formParticipants, formSplitMethod, formCustomSplits]);
+  const captureSnapshot = useRef(false);
+  useEffect(() => {
+    if (captureSnapshot.current) { financialSnapshot.current = financialState; captureSnapshot.current = false; }
+  }, [financialState, editingExpense]);
+  useEffect(() => {
+    setFormError(null);
+    setFieldErrors(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => {
+      if (id === 'input-expense-title') return !formTitle.trim();
+      if (id === 'input-expense-amount') return parsePositiveMoney(formAmount) === null;
+      if (id === 'input-expense-date') return !isValidExpenseDate(formDate);
+      if (id === 'select-expense-payer') return !formPayer;
+      if (id === 'expense-participants') return formParticipants.length === 0;
+      if (id === 'input-exchange-rate') return useCustomExchangeRate && parsePositiveDecimal(customExchangeRateInput) === null;
+      if (id === 'input-fee-percent') return isServiceFeeEnabled && (!Number.isFinite(Number(feePercentInput)) || Number(feePercentInput) < 0 || Number(feePercentInput) > 100);
+      return false;
+    })));
+  }, [formTitle, formAmount, formDate, formNotes, formPayer, financialState]);
+  const fieldError = (id: string) => fieldErrors[id]
+    ? <p id={`${id}-error`} role="alert" className="mt-2 text-xs font-semibold text-[var(--color-negative)]">{fieldErrors[id]}</p> : null;
+  const setValidationError = (message: string, id: string) => {
+    setFieldErrors({ [id]: message });
+    setFormStep('basic');
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
   const getBlockingErrorMessage = (error: unknown, fallback: string) => {
@@ -415,6 +442,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setFormStepWithReason('basic', `reset:${reason}`);
     setShowCustomizeSplit(false);
     setShowMoreOptions(false);
+    setFieldErrors({});
     setFormError(null);
   };
 
@@ -449,7 +477,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     setUseCustomExchangeRate(false);
     setCustomExchangeRateInput('');
     setFormPayer(currentMember.id);
-    setFormDate(new Date().toISOString().split('T')[0]);
+    setFormDate(localDateKey());
     setFormParticipants(activeIds);
     setFormSplitMethod('equal');
     initializeCustomSplits(activeIds);
@@ -460,7 +488,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   };
 
   const handleOpenEditForm = (expense: Expense) => {
-    if (isReadOnly) return;
+    if (isReadOnly || blockingSettlements(expense, settlements).length) return;
 
     clearReceiptImportSession();
     const expenseSplits = splits.filter(s => s.expense_id === expense.id);
@@ -488,12 +516,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
     for (const split of expenseSplits) {
       const equalSplit = equalsResult.find(item => item.member_id === split.member_id);
-      if (!equalSplit || Math.abs(equalSplit.amount_owed - split.amount_owed) > 0.01) {
+      if (!equalSplit || Math.round(equalSplit.amount_owed * 100) !== Math.round(split.amount_owed * 100)) {
         isSplitEqual = false;
         break;
       }
     }
 
+    captureSnapshot.current = true;
     setEditingExpense(expense);
     setFormTitle(expense.title);
     setFormVisualId(readExpenseVisualPreference(trip.id, expense.title));
@@ -506,12 +535,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       setUseCustomExchangeRate(false);
       setCustomExchangeRateInput('');
     } else {
-      const currentTripRate = getTripExchangeRate(safeExchangeRates, trip?.id, expense.currency, tripBaseCurrency);
-      const matchesTripRate = currentTripRate
-        ? Math.abs(currentTripRate.rate - expense.exchange_rate_to_base) < 0.000001
-        : false;
-      setUseCustomExchangeRate(!matchesTripRate);
-      setCustomExchangeRateInput(matchesTripRate ? '' : expense.exchange_rate_to_base.toString());
+      setUseCustomExchangeRate(true);
+      setCustomExchangeRateInput(expense.exchange_rate_to_base.toString());
     }
     setFormPayer(expense.paid_by_member_id);
     setFormDate(expense.expense_date);
@@ -559,26 +584,35 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
   const validateBasicFields = () => {
     if (!formTitle.trim()) {
-      setValidationError('Title is required');
+      setValidationError('What was it for? Enter a description.', 'input-expense-title');
       return false;
     }
 
     const amount = parsePositiveMoney(formAmount);
     if (amount === null) {
-      setValidationError(isServiceFeeEnabled ? 'Subtotal must be greater than zero' : 'Amount must be greater than zero');
+      setValidationError(isServiceFeeEnabled ? 'Subtotal before fee must be greater than zero' : 'Amount must be greater than zero', 'input-expense-amount');
       return false;
     }
 
     if (!hasValidFeePercent) {
-      setValidationError('Service fee must be between 0 and 100 percent');
+      setValidationError('Fee % must be between 0 and 100', 'input-fee-percent');
       return false;
     }
 
     if (!formPayer) {
-      setValidationError('Choose who paid');
+      setValidationError('Paid by: choose a payer', 'select-expense-payer');
       return false;
     }
 
+    if (formParticipants.length === 0) {
+      setValidationError('Select at least one participant', 'expense-participants');
+      return false;
+    }
+    if (!isValidExpenseDate(formDate)) {
+      setValidationError('Expense date must be a valid date in YYYY-MM-DD format', 'input-expense-date');
+      return false;
+    }
+    setFieldErrors({});
     setFormError(null);
     return true;
   };
@@ -591,10 +625,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     if (!validateBasicFields()) return;
 
     if (formCurrency !== tripBaseCurrency && !hasValidRate) {
-      setBlockingError(useCustomExchangeRate
-        ? 'Enter a custom exchange rate greater than zero'
-        : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
-      );
+      if (useCustomExchangeRate) setFieldErrors({ 'input-exchange-rate': 'Custom exchange rate must be greater than zero' });
       setFormStepWithReason('preview', 'continue-missing-rate');
       return;
     }
@@ -623,7 +654,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     }
 
     if (!smartCustomSplitResult.isValid) {
-      setBlockingError(smartCustomSplitResult.error ?? 'Custom split amounts must match the converted expense total.');
+      setFormError(null);
+      requestAnimationFrame(() => document.getElementById(`input-custom-split-${formParticipants[0]}`)?.focus());
       return null;
     }
 
@@ -646,6 +678,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       return;
     }
 
+    if (editingExpense && financialState === financialSnapshot.current) {
+      setIsSaving(true);
+      try {
+        await onUpdateExpenseMetadata(editingExpense.id, formTitle.trim(), formDate, formNotes.trim());
+        if (formVisualId) writeExpenseVisualPreference(trip.id, formTitle.trim(), formVisualId);
+        closeForm();
+      } catch (error) { setBlockingError(getBlockingErrorMessage(error, 'Could not save this expense')); }
+      finally { setIsSaving(false); submitSourceRef.current = null; }
+      return;
+    }
+
     const amount = amountValue;
     const feeInput: ExpenseFeeInput = {
       subtotal_amount: subtotalValue,
@@ -654,10 +697,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     };
     const exchangeRate = activeExchangeRate;
     if (exchangeRate === null || !Number.isFinite(exchangeRate) || exchangeRate <= 0) {
-      setBlockingError(useCustomExchangeRate
-        ? 'Exchange rate must be greater than zero'
-        : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}. Ask admin to set it or enter a custom rate.`
-      );
+      if (useCustomExchangeRate) setFieldErrors({ 'input-exchange-rate': 'Custom exchange rate must be greater than zero' });
+      requestAnimationFrame(() => document.getElementById('input-exchange-rate')?.focus());
       setFormStepWithReason('preview', 'submit-invalid-rate');
       submitSourceRef.current = null;
       return;
@@ -794,11 +835,271 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
         ? `Using group rate: 1 ${formCurrency} = ${tripExchangeRate.toString()} ${tripBaseCurrency}`
         : `No group exchange rate set for ${formCurrency} -> ${tripBaseCurrency}`;
 
+  const splitErrorMessage = !hasValidConvertedAmount
+    ? 'Enter an amount and exchange rate to calculate shares.'
+    : formParticipants.length === 0
+      ? 'Select at least one participant.'
+      : smartCustomSplitResult.error?.includes('zero or positive')
+        ? 'Enter shares as zero or positive amounts with up to two decimals.'
+        : smartCustomSplitResult.remainingAmount !== 0
+          ? splitAllocationMessage(smartCustomSplitResult.remainingAmount, tripBaseCurrency)
+          : 'Check that the shares match the expense total.';
+
+  const splitEditor = (
+    <section id="expense-split-editor" tabIndex={-1} className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4 flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-white">Customize split</h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {isServiceFeeEnabled
+              ? `Enter pre-fee shares in ${tripBaseCurrency}. Parité adds the service fee automatically.`
+              : `Split amounts are in ${tripBaseCurrency}. Personal display currency is only a preview.`}
+          </p>
+        </div>
+        <button
+          type="button"
+          id="btn-split-all-match"
+          onClick={() => {
+            const allIds = approvedMembers.map(member => member.id);
+            setFormParticipants(allIds);
+            setFormCustomSplits(prev => {
+              const next: Record<string, string> = {};
+              allIds.forEach(id => {
+                next[id] = formParticipants.includes(id) ? prev[id] ?? '' : '';
+              });
+              return next;
+            });
+          }}
+          className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-2 rounded-xl cursor-pointer"
+        >
+          Select all
+        </button>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2">
+        {approvedMembers.map(member => {
+          const isChecked = formParticipants.includes(member.id);
+          return (
+            <button
+              type="button"
+              key={member.id}
+              id={`checkbox-participant-${member.id}`}
+              aria-pressed={isChecked}
+              onClick={() => toggleParticipant(member.id)}
+              className={`min-h-11 rounded-2xl border px-3 py-2 flex items-center gap-3 text-left cursor-pointer ${
+                isChecked
+                  ? 'bg-indigo-500/10 border-indigo-500/35 text-white'
+                  : 'bg-[#121418] border-slate-800 text-slate-400'
+              }`}
+            >
+              <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+                isChecked ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'
+              }`}>
+                {isChecked && <Check className="w-3.5 h-3.5 text-white" />}
+              </span>
+              <MemberAvatar member={member} size="xs" />
+              <span className="text-sm font-semibold truncate">{member.display_name}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 bg-[#121418] border border-slate-800 p-1 rounded-2xl">
+        <button
+          type="button"
+          id="btn-split-equal"
+          onClick={() => {
+            setFormSplitMethod('equal');
+            initializeCustomSplits(formParticipants);
+          }}
+          className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
+            formSplitMethod === 'equal' ? 'bg-indigo-600 text-slate-950' : 'text-slate-400'
+          }`}
+        >
+          Equal
+        </button>
+        <button
+          type="button"
+          id="btn-split-custom"
+          onClick={() => setFormSplitMethod('custom')}
+          className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
+            formSplitMethod === 'custom' ? 'bg-indigo-600 text-slate-950' : 'text-slate-400'
+          }`}
+        >
+          Custom
+        </button>
+      </div>
+
+      {formSplitMethod === 'equal' ? (
+        <div className="grid gap-2 lg:grid-cols-2">
+          {equalPreviewSplits.map(item => {
+            const member = approvedMembers.find(m => m.id === item.member_id);
+            return (
+              <div key={item.member_id} className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                <span className="flex min-w-0 items-center gap-2 truncate">
+                  <MemberAvatar member={member} size="xs" />
+                  <span className="truncate">{member?.display_name ?? 'Participant'}</span>
+                </span>
+                <span className="font-mono font-bold text-slate-100">
+                  {item.amount_owed.toFixed(2)} {tripBaseCurrency}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                initializeCustomSplits(formParticipants);
+                setFormSplitMethod('equal');
+                setFormError(null);
+              }}
+              className="text-[10px] font-bold text-slate-200 bg-[#121418] border border-slate-800 px-3 py-2 rounded-xl cursor-pointer"
+            >
+              Reset equal split
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                initializeCustomSplits(formParticipants);
+                setFormError(null);
+              }}
+              className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-2 rounded-xl cursor-pointer"
+            >
+              Clear manual amounts
+            </button>
+          </div>
+          <div className={`rounded-2xl border px-3 py-2 text-[11px] ${
+            smartCustomSplitResult.isValid
+              ? 'bg-[#121418] border-slate-800 text-slate-500'
+              : 'bg-[#e07a5f] border-[#e07a5f] text-[#3d405b] font-bold'
+          }`}>
+            <div className="mb-2 border-b border-slate-800 pb-2">
+              <p className="font-mono text-slate-200">
+                Total: {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
+              </p>
+              {isServiceFeeEnabled && (
+                <>
+                  <p className="font-mono text-slate-500 mt-1">
+                    Pre-fee subtotal: {Number.isFinite(convertedSubtotalAmount) ? convertedSubtotalAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                  </p>
+                  <p className="font-mono text-slate-500 mt-1">
+                    Service fee: {Number.isFinite(convertedFeeAmount) ? convertedFeeAmount.toFixed(2) : '--'} {tripBaseCurrency}
+                  </p>
+                </>
+              )}
+              {convertedTotalDisplay?.converted && (
+                <p className="font-mono text-indigo-300 mt-1">
+                  {convertedTotalDisplay.primary}
+                </p>
+              )}
+              {convertedTotalDisplay?.helper && (
+                <p className="mt-1">{convertedTotalDisplay.helper}</p>
+              )}
+            </div>
+            <p>
+              {smartCustomSplitResult.isValid ? (smartCustomSplitResult.autoParticipantCount > 0 ? `${tripBaseCurrency} ${smartCustomSplitResult.remainingAmount.toFixed(2)} assigned automatically · Fully allocated` : 'Fully allocated') : splitErrorMessage}
+            </p>
+          </div>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {formParticipants.map(participantId => {
+              const member = approvedMembers.find(m => m.id === participantId);
+              const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
+              const manualValue = formCustomSplits[participantId] ?? '';
+              const isManual = manualValue.trim() !== '' && splitRow?.mode === 'manual';
+              const displaySplit = splitRow?.amount_owed ?? 0;
+              const displaySubtotalSplit = splitRow?.subtotal_amount_owed ?? displaySplit;
+              const displayFeeSplit = splitRow?.fee_amount_owed ?? 0;
+              const displaySplitEquivalent = formatDisplayMoney(
+                displaySplit,
+                tripBaseCurrency,
+                displayCurrency,
+                safeExchangeRates,
+                trip.id
+              );
+              return (
+                <label key={participantId} className="flex items-center justify-between gap-3 rounded-2xl bg-[#121418] border border-slate-800 px-3 py-2">
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <MemberAvatar member={member} size="xs" />
+                    <span className="min-w-0">
+                      <span className="text-sm font-semibold text-slate-200 truncate block">
+                        {member?.display_name ?? 'Participant'}
+                      </span>
+                      <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
+                        isManual ? 'text-indigo-300' : 'text-slate-500'
+                      }`}>
+                        {isManual ? 'Manual' : 'Auto'}
+                      </span>
+                      {!isManual && (
+                        <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                          Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
+                        </span>
+                      )}
+                      {isServiceFeeEnabled && (
+                        <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                          +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
+                        </span>
+                      )}
+                      {displaySplitEquivalent.converted && (
+                        <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                          {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      id={`input-custom-split-${participantId}`}
+                      aria-label={`${member?.display_name ?? "Participant"} share in ${tripBaseCurrency}`}
+                      value={manualValue}
+                      onChange={event => {
+                        const nextValue = normalizeDecimalInput(event.target.value);
+                        if (isMoneyInputValue(nextValue)) {
+                          setFormCustomSplits(prev => ({
+                            ...prev,
+                            [participantId]: nextValue,
+                          }));
+                        }
+                      }}
+                      placeholder={displaySubtotalSplit.toFixed(2)}
+                      className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex justify-between border-t border-slate-800 pt-3 text-xs">
+            <span className="text-slate-500">Calculated total</span>
+            <span className="font-mono text-slate-200 text-right">
+              <span className="block">
+                {customSplitTotal.toFixed(2)}
+                {' / '}
+                {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
+              </span>
+              {customSplitTotalDisplay.converted && (
+                <span className="block text-[10px] text-slate-500 mt-0.5">
+                  {customSplitTotalDisplay.primary}
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+
   return (
     <div className={`relative flex h-full min-h-0 flex-col overflow-hidden ${isFormOpen ? '' : 'animate-fade-in'}`}>
       {isFormOpen ? createPortal(
         <form
-          onSubmit={handleFormSubmit}
+          noValidate onSubmit={handleFormSubmit}
           className="parite-shell fixed inset-0 z-[70] mx-auto flex h-[100dvh] min-h-0 w-full max-w-md flex-col bg-[#f5f7f4] font-sans md:inset-6 md:h-auto md:max-w-6xl md:overflow-hidden md:rounded-[36px] md:border md:border-black/10 md:shadow-2xl"
         >
           <div
@@ -829,7 +1130,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             className="no-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto px-4 py-5 scroll-pb-6 md:px-6 lg:px-8"
           >
             {formError && (
-              <div className="mx-auto mb-4 max-w-4xl bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
+              <div role="alert" className="mx-auto mb-4 max-w-4xl bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{formError}</span>
               </div>
@@ -874,14 +1175,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
                   <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
                     <div>
-                      <label className="mb-2 block text-xs font-semibold text-slate-600">
+                      <label htmlFor="input-expense-amount" className="mb-2 block text-xs font-semibold text-slate-600">
                         {isServiceFeeEnabled ? 'Subtotal before fee' : 'Amount'}
                       </label>
                       <input
                         type="text"
                         inputMode="decimal"
                         required
-                        id="input-expense-amount"
+                        id="input-expense-amount" aria-invalid={Boolean(fieldErrors["input-expense-amount"]) } aria-describedby="input-expense-amount-error"
                         value={formAmount}
                         onChange={event => {
                           const nextValue = normalizeDecimalInput(event.target.value);
@@ -890,12 +1191,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         placeholder="0.00"
                         className="w-full border-0 border-b-2 border-[#81b29a] bg-transparent px-1 py-2 font-mono text-4xl font-bold text-slate-900 placeholder-slate-300 focus:border-[#4f7f68] focus:outline-none"
                       />
+                      {fieldError('input-expense-amount')}
                     </div>
 
                     <div>
-                      <label className="mb-2 block text-xs font-semibold text-slate-600">
-                        Currency
-                      </label>
+                      <label htmlFor="select-expense-currency" className="mb-2 block text-xs font-semibold text-slate-600">Currency</label>
                       <select
                         value={formCurrency}
                         id="select-expense-currency"
@@ -917,7 +1217,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 </section>
 
                 <section className="grid grid-cols-2 gap-2 rounded-[24px] border border-black/10 bg-white p-2.5 shadow-sm">
-                  <div className="flex min-w-0 items-center gap-2 rounded-2xl bg-[#e7f3ee] px-3 py-2.5">
+                  <button type="button" onClick={() => document.getElementById("select-expense-payer")?.focus()} className="flex min-w-0 items-center gap-2 rounded-2xl bg-[#e7f3ee] px-3 py-2.5 text-left">
                     <MemberAvatar member={formPayerMember} size="xs" />
                     <span className="min-w-0">
                       <span className="block text-[10px] font-medium text-slate-500">Paid by</span>
@@ -925,46 +1225,46 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         {formPayer === currentMember.id ? 'You' : payerName}
                       </span>
                     </span>
-                  </div>
-                  <div className="min-w-0 rounded-2xl bg-[#e8f1fa] px-3 py-2.5">
+                  </button>
+                  <button type="button" aria-expanded={showCustomizeSplit} onClick={() => { setShowCustomizeSplit(true); requestAnimationFrame(() => document.getElementById("expense-split-editor")?.focus()); }} className="text-left min-w-0 rounded-2xl bg-[#e8f1fa] px-3 py-2.5">
                     <span className="block text-[10px] font-medium text-slate-500">
                       {formSplitMethod === 'equal' ? 'Split equally' : 'Custom split'}
                     </span>
-                    <span className="block truncate text-xs font-bold text-slate-800">{participantSummary}</span>
-                  </div>
+                    <span className="block truncate text-xs font-bold text-slate-800">{participantSummary} · Edit</span>
+                  </button>
                 </section>
 
                 <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
-                  <label className="mb-2 block text-xs font-semibold text-slate-600">
-                    What was it for?
-                  </label>
+                  <label htmlFor="input-expense-title" className="mb-2 block text-xs font-semibold text-slate-600">What was it for?</label>
                   <input
                     type="text"
-                    id="input-expense-title"
+                    id="input-expense-title" aria-invalid={Boolean(fieldErrors["input-expense-title"]) } aria-describedby="input-expense-title-error"
                     required
                     value={formTitle}
                     onChange={event => setFormTitle(event.target.value)}
                     placeholder="Dinner, taxi, tickets"
                     className="min-h-12 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                   />
+                      {fieldError('input-expense-title')}
                   <div className="mt-4">
-                    <ExpenseVisualPicker
-                      title={formTitle}
-                      value={formVisualId}
-                      onChange={handleSelectExpenseVisual}
-                    />
+                    <label htmlFor="input-expense-date" className="mb-2 block text-xs font-semibold text-slate-600">Expense date</label>
+                    {/* Capture native date input immediately, before change is committed. */}
+                    <input id="input-expense-date" type="date" required
+                      value={formDate} onInput={event => setFormDate(event.currentTarget.value)} onChange={event => setFormDate(event.target.value)}
+                      aria-invalid={Boolean(fieldErrors['input-expense-date'])} aria-describedby="expense-date-hint input-expense-date-error"
+                      className="min-h-12 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-3 font-mono text-sm" />
+                    <p id="expense-date-hint" className="mt-1 text-[11px] text-slate-500">Use the purchase date, including past dates.</p>
+                    {fieldError('input-expense-date')}
                   </div>
                 </section>
 
                 <section className="rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
-                  <label className="mb-2 block text-xs font-semibold text-slate-600">
-                    Paid by
-                  </label>
+                  <label htmlFor="select-expense-payer" className="mb-2 block text-xs font-semibold text-slate-600">Paid by</label>
                   <div className="flex items-center gap-3">
                     <MemberAvatar member={formPayerMember} size="md" />
                     <select
                       value={formPayer}
-                      id="select-expense-payer"
+                      id="select-expense-payer" aria-invalid={Boolean(fieldErrors["select-expense-payer"]) } aria-describedby="select-expense-payer-error"
                       onChange={event => setFormPayer(event.target.value)}
                       className="min-h-12 min-w-0 flex-1 cursor-pointer rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-3 text-sm text-slate-900 focus:border-[#81b29a] focus:outline-none"
                     >
@@ -974,8 +1274,29 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         </option>
                       ))}
                     </select>
+                    {fieldError('select-expense-payer')}
                   </div>
                 </section>
+
+                <section id="expense-participants" tabIndex={-1} className="rounded-[24px] border border-black/10 bg-white p-4">
+                  <h3 className="text-sm font-bold">Participants · {formSplitMethod === 'equal' ? 'Equal split' : 'Custom split'}</h3>
+                  <div className={`${showCustomizeSplit ? "hidden" : "flex"} mt-3 flex-wrap gap-2`}>{approvedMembers.map(member => <button key={member.id} type="button"
+                    aria-pressed={formParticipants.includes(member.id)} onClick={() => toggleParticipant(member.id)}
+                    className={`min-h-11 rounded-xl border px-3 text-xs ${formParticipants.includes(member.id) ? 'bg-[#e7f3ee] border-[#81b29a]' : 'border-black/10'}`}>{member.display_name}</button>)}</div>
+                  <button type="button" className="mt-3 min-h-10 text-xs font-bold text-[var(--color-positive)]" onClick={() => setShowCustomizeSplit(value => !value)}>Edit split amounts</button>
+                  {formParticipants.length === 0 && <p role="alert" className="text-xs text-[var(--color-negative)]">Select at least one participant</p>}
+                </section>
+                {showCustomizeSplit && splitEditor}
+                <details className="rounded-[24px] border border-black/10 bg-white p-4">
+                  <summary className="cursor-pointer text-xs font-semibold">Expense icon · Optional</summary>
+                  <div className="mt-4">
+                    <ExpenseVisualPicker
+                      title={formTitle}
+                      value={formVisualId}
+                      onChange={handleSelectExpenseVisual}
+                    />
+                  </div>
+                </details>
 
                 <section className="flex flex-col gap-3 rounded-[24px] border border-black/10 bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
@@ -1010,21 +1331,21 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     <div className="flex flex-col gap-3">
                       <div className="grid grid-cols-[1fr_96px] gap-3">
                         <div>
-                          <label className="mb-2 block text-xs font-semibold text-slate-600">Fee label</label>
+                          <label htmlFor="input-fee-label" className="mb-2 block text-xs font-semibold text-slate-600">Fee label</label>
                           <input
                             type="text"
-                            value={feeLabelInput}
+                            id="input-fee-label" value={feeLabelInput}
                             onChange={event => setFeeLabelInput(event.target.value)}
                             placeholder="Service fee"
                             className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                           />
                         </div>
                         <div>
-                          <label className="mb-2 block text-xs font-semibold text-slate-600">Fee %</label>
+                          <label htmlFor="input-fee-percent" className="mb-2 block text-xs font-semibold text-slate-600">Fee %</label>
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={feePercentInput}
+                            id="input-fee-percent" aria-invalid={Boolean(fieldErrors["input-fee-percent"]) } aria-describedby="input-fee-percent-error" value={feePercentInput}
                             onChange={event => {
                               const nextValue = normalizeDecimalInput(event.target.value);
                               if (isDecimalInputValue(nextValue)) setFeePercentInput(nextValue);
@@ -1032,6 +1353,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                             placeholder="10"
                             className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] px-3 py-2.5 font-mono text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                           />
+                      {fieldError('input-fee-percent')}
                         </div>
                       </div>
 
@@ -1064,6 +1386,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           Preview
                         </p>
                         <h3 className="text-lg font-bold text-white truncate mt-1">{formTitle}</h3>
+                        <p className="mt-2 text-xs text-slate-400">Expense date · {formatExpenseDate(formDate)}</p>
                         <span
                           className="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold"
                           style={{
@@ -1110,7 +1433,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       <p className="text-slate-100 font-semibold">{participantSummary}</p>
                     </div>
                     <div className="rounded-2xl bg-[#121418] border border-slate-800 p-3">
-                      <p className="text-slate-500 mb-1">Each person owes</p>
+                      <p className="text-slate-500 mb-1">Each person’s share</p>
                       <p className="text-slate-100 font-mono font-bold">
                         {formSplitMethod === 'equal'
                           ? hasValidConvertedAmount
@@ -1281,15 +1604,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
 
                     {useCustomExchangeRate && (
                       <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-2">
-                          Custom exchange rate
-                        </label>
+                        <label htmlFor="input-exchange-rate" className="block text-xs font-semibold text-slate-300 mb-2">Custom exchange rate</label>
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-mono text-slate-400">1 {formCurrency} =</span>
                           <input
                             type="text"
                             inputMode="decimal"
-                            id="input-exchange-rate"
+                            id="input-exchange-rate" aria-describedby="input-exchange-rate-error" aria-invalid={Boolean(fieldErrors["input-exchange-rate"])}
                             value={customExchangeRateInput}
                             onChange={event => {
                               const nextValue = normalizeDecimalInput(event.target.value);
@@ -1302,6 +1623,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                           />
                           <span className="text-xs font-mono text-slate-400">{tripBaseCurrency}</span>
                         </div>
+                        {fieldError("input-exchange-rate")}
                         {tripExchangeRate && (
                           <button
                             type="button"
@@ -1346,279 +1668,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   </button>
                 </div>
 
-                {showCustomizeSplit && (
-                  <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4 flex flex-col gap-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Customize split</h3>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {isServiceFeeEnabled
-                            ? `Enter pre-fee shares in ${tripBaseCurrency}. Parité adds the service fee automatically.`
-                            : `Split amounts are in ${tripBaseCurrency}. Personal display currency is only a preview.`}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        id="btn-split-all-match"
-                        onClick={() => {
-                          const allIds = approvedMembers.map(member => member.id);
-                          setFormParticipants(allIds);
-                          setFormCustomSplits(prev => {
-                            const next: Record<string, string> = {};
-                            allIds.forEach(id => {
-                              next[id] = formParticipants.includes(id) ? prev[id] ?? '' : '';
-                            });
-                            return next;
-                          });
-                        }}
-                        className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-2 rounded-xl cursor-pointer"
-                      >
-                        Select all
-                      </button>
-                    </div>
-
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {approvedMembers.map(member => {
-                        const isChecked = formParticipants.includes(member.id);
-                        return (
-                          <button
-                            type="button"
-                            key={member.id}
-                            id={`checkbox-participant-${member.id}`}
-                            onClick={() => toggleParticipant(member.id)}
-                            className={`min-h-11 rounded-2xl border px-3 py-2 flex items-center gap-3 text-left cursor-pointer ${
-                              isChecked
-                                ? 'bg-indigo-500/10 border-indigo-500/35 text-white'
-                                : 'bg-[#121418] border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-                              isChecked ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700'
-                            }`}>
-                              {isChecked && <Check className="w-3.5 h-3.5 text-white" />}
-                            </span>
-                            <MemberAvatar member={member} size="xs" />
-                            <span className="text-sm font-semibold truncate">{member.display_name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 bg-[#121418] border border-slate-800 p-1 rounded-2xl">
-                      <button
-                        type="button"
-                        id="btn-split-equal"
-                        onClick={() => {
-                          setFormSplitMethod('equal');
-                          initializeCustomSplits(formParticipants);
-                        }}
-                        className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                          formSplitMethod === 'equal' ? 'bg-indigo-600 text-slate-950' : 'text-slate-400'
-                        }`}
-                      >
-                        Equal
-                      </button>
-                      <button
-                        type="button"
-                        id="btn-split-custom"
-                        onClick={() => setFormSplitMethod('custom')}
-                        className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                          formSplitMethod === 'custom' ? 'bg-indigo-600 text-slate-950' : 'text-slate-400'
-                        }`}
-                      >
-                        Custom
-                      </button>
-                    </div>
-
-                    {formSplitMethod === 'equal' ? (
-                      <div className="grid gap-2 lg:grid-cols-2">
-                        {equalPreviewSplits.map(item => {
-                          const member = approvedMembers.find(m => m.id === item.member_id);
-                          return (
-                            <div key={item.member_id} className="flex items-center justify-between gap-3 text-xs text-slate-400">
-                              <span className="flex min-w-0 items-center gap-2 truncate">
-                                <MemberAvatar member={member} size="xs" />
-                                <span className="truncate">{member?.display_name ?? 'Participant'}</span>
-                              </span>
-                              <span className="font-mono font-bold text-slate-100">
-                                {item.amount_owed.toFixed(2)} {tripBaseCurrency}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              initializeCustomSplits(formParticipants);
-                              setFormSplitMethod('equal');
-                              setFormError(null);
-                            }}
-                            className="text-[10px] font-bold text-slate-200 bg-[#121418] border border-slate-800 px-3 py-2 rounded-xl cursor-pointer"
-                          >
-                            Reset equal split
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              initializeCustomSplits(formParticipants);
-                              setFormError(null);
-                            }}
-                            className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-2 rounded-xl cursor-pointer"
-                          >
-                            Clear manual amounts
-                          </button>
-                        </div>
-                        <div className={`rounded-2xl border px-3 py-2 text-[11px] ${
-                          smartCustomSplitResult.isValid
-                            ? 'bg-[#121418] border-slate-800 text-slate-500'
-                            : 'bg-[#e07a5f] border-[#e07a5f] text-[#3d405b] font-bold'
-                        }`}>
-                          <div className="mb-2 border-b border-slate-800 pb-2">
-                            <p className="font-mono text-slate-200">
-                              Total: {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
-                            </p>
-                            {isServiceFeeEnabled && (
-                              <>
-                                <p className="font-mono text-slate-500 mt-1">
-                                  Pre-fee subtotal: {Number.isFinite(convertedSubtotalAmount) ? convertedSubtotalAmount.toFixed(2) : '--'} {tripBaseCurrency}
-                                </p>
-                                <p className="font-mono text-slate-500 mt-1">
-                                  Service fee: {Number.isFinite(convertedFeeAmount) ? convertedFeeAmount.toFixed(2) : '--'} {tripBaseCurrency}
-                                </p>
-                              </>
-                            )}
-                            {convertedTotalDisplay?.converted && (
-                              <p className="font-mono text-indigo-300 mt-1">
-                                {convertedTotalDisplay.primary}
-                              </p>
-                            )}
-                            {convertedTotalDisplay?.helper && (
-                              <p className="mt-1">{convertedTotalDisplay.helper}</p>
-                            )}
-                          </div>
-                          <p>
-                            Remaining {isServiceFeeEnabled ? 'pre-fee subtotal' : 'amount'} to distribute: {smartCustomSplitResult.remainingAmount.toFixed(2)} {tripBaseCurrency}
-                          </p>
-                          {!smartCustomSplitResult.isValid && smartCustomSplitResult.error && (
-                            <p className="mt-1">{smartCustomSplitResult.error}</p>
-                          )}
-                        </div>
-                        <div className="grid gap-2 lg:grid-cols-2">
-                          {formParticipants.map(participantId => {
-                            const member = approvedMembers.find(m => m.id === participantId);
-                            const splitRow = smartCustomSplitResult.rows.find(row => row.member_id === participantId);
-                            const manualValue = formCustomSplits[participantId] ?? '';
-                            const isManual = manualValue.trim() !== '' && splitRow?.mode === 'manual';
-                            const displaySplit = splitRow?.amount_owed ?? 0;
-                            const displaySubtotalSplit = splitRow?.subtotal_amount_owed ?? displaySplit;
-                            const displayFeeSplit = splitRow?.fee_amount_owed ?? 0;
-                            const displaySplitEquivalent = formatDisplayMoney(
-                              displaySplit,
-                              tripBaseCurrency,
-                              displayCurrency,
-                              safeExchangeRates,
-                              trip.id
-                            );
-                            return (
-                              <label key={participantId} className="flex items-center justify-between gap-3 rounded-2xl bg-[#121418] border border-slate-800 px-3 py-2">
-                                <span className="flex min-w-0 items-center gap-2.5">
-                                  <MemberAvatar member={member} size="xs" />
-                                  <span className="min-w-0">
-                                    <span className="text-sm font-semibold text-slate-200 truncate block">
-                                      {member?.display_name ?? 'Participant'}
-                                    </span>
-                                    <span className={`text-[10px] font-bold uppercase mt-1 inline-block ${
-                                      isManual ? 'text-indigo-300' : 'text-slate-500'
-                                    }`}>
-                                      {isManual ? 'Manual' : 'Auto'}
-                                    </span>
-                                    {!isManual && (
-                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                        Auto {displaySubtotalSplit.toFixed(2)} {tripBaseCurrency}
-                                      </span>
-                                    )}
-                                    {isServiceFeeEnabled && (
-                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                        +{displayFeeSplit.toFixed(2)} fee = {displaySplit.toFixed(2)} {tripBaseCurrency}
-                                      </span>
-                                    )}
-                                    {displaySplitEquivalent.converted && (
-                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
-                                        {displaySplit.toFixed(2)} {tripBaseCurrency} {displaySplitEquivalent.primary}
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-                                <span className="flex items-center gap-2 shrink-0">
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    id={`input-custom-split-${participantId}`}
-                                    value={manualValue}
-                                    onChange={event => {
-                                      const nextValue = normalizeDecimalInput(event.target.value);
-                                      if (isMoneyInputValue(nextValue)) {
-                                        setFormCustomSplits(prev => ({
-                                          ...prev,
-                                          [participantId]: nextValue,
-                                        }));
-                                      }
-                                    }}
-                                    placeholder={displaySubtotalSplit.toFixed(2)}
-                                    className="w-24 bg-[#1a1d23] border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs text-right text-slate-100 focus:border-indigo-500 focus:outline-none"
-                                  />
-                                  <span className="text-[10px] font-mono text-slate-500">{tripBaseCurrency}</span>
-                                </span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                        <div className="flex justify-between border-t border-slate-800 pt-3 text-xs">
-                          <span className="text-slate-500">Calculated total</span>
-                          <span className="font-mono text-slate-200 text-right">
-                            <span className="block">
-                              {customSplitTotal.toFixed(2)}
-                              {' / '}
-                              {hasValidConvertedAmount ? convertedAmount.toFixed(2) : '--'} {tripBaseCurrency}
-                            </span>
-                            {customSplitTotalDisplay.converted && (
-                              <span className="block text-[10px] text-slate-500 mt-0.5">
-                                {customSplitTotalDisplay.primary}
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </section>
-                )}
+                {showCustomizeSplit && splitEditor}
 
                 {showMoreOptions && (
                   <section className="rounded-3xl bg-[#1a1d23] border border-slate-800 p-4 flex flex-col gap-4">
                     <h3 className="text-sm font-bold text-white">More options</h3>
 
                     <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-2">
-                        Date
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        id="input-expense-date"
-                        value={formDate}
-                        onChange={event => setFormDate(event.target.value)}
-                        className="w-full min-h-12 bg-[#121418] border border-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-100 font-mono focus:border-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-2">
-                        Notes
-                      </label>
+                      <label htmlFor="input-expense-notes" className="block text-xs font-semibold text-slate-300 mb-2">Notes</label>
                       <textarea
                         value={formNotes}
                         id="input-expense-notes"
@@ -1745,7 +1802,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 <div className="min-w-[128px] rounded-2xl border border-[#c8dff2] bg-[#e7f2fc] p-3 text-right">
                   <div className="flex items-center justify-end gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#557792]">
                     <Receipt className="h-3.5 w-3.5" />
-                    Total spent
+                    {searchQuery ? 'Group total' : 'Total spent'}
                   </div>
                   <p className="mt-2 font-mono text-base font-bold text-slate-800">{totalSpendingDisplay.primary}</p>
                   {totalSpendingDisplay.secondary && (
@@ -1762,12 +1819,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               <div className="relative min-w-0 flex-1">
                 <input
                   type="text"
-                  id="expense-search"
+                  id="expense-search" aria-label="Search expenses"
                   value={searchQuery}
                   onChange={event => setSearchQuery(event.target.value)}
                   placeholder="Search title, category or payer"
-                  className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] py-3 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
+                  className="min-h-11 w-full rounded-2xl border border-black/10 bg-[#f7f8f5] py-3 pl-10 pr-11 text-sm text-slate-900 placeholder-slate-400 focus:border-[#81b29a] focus:outline-none"
                 />
+                {searchQuery && <button type="button" aria-label="Clear search" onClick={() => setSearchQuery('')} className="absolute right-1 top-1 min-h-9 min-w-9 rounded-xl bg-white"><X className="mx-auto h-4 w-4" /></button>}
                 <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
               </div>
               <button
@@ -1781,7 +1839,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 }`}
               >
                 <SlidersHorizontal className="h-4 w-4" />
-                {expenseListFilter === 'mine' ? 'Mine' : 'All'}
+                {expenseListFilter === 'mine' ? 'Involving me' : 'All'}
               </button>
             </div>
 
@@ -1803,6 +1861,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                         ? 'Historical expenses will appear here.'
                         : 'Tap the plus button to add the first shared cost.'}
                   </p>
+                  {(searchQuery || expenseListFilter === 'mine') && <button type="button" className="mt-4 min-h-11 rounded-xl bg-[var(--color-positive)] px-4 text-xs font-bold text-white" onClick={() => { setSearchQuery(''); setExpenseListFilter('all'); }}>Show all expenses</button>}
                 </div>
               ) : (
                 groupedExpenses.map(group => (
@@ -1906,7 +1965,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       )}
 
       {detailExpense && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center z-50 p-4 md:items-center">
+        <Modal label="Expense details" onClose={() => { setFormError(null); onSetSelectedExpenseId(null); }}>
           <div className="flex max-h-[85dvh] min-h-0 w-full max-w-sm flex-col overflow-hidden rounded-[24px] border border-slate-800 bg-[#121418] shadow-2xl animate-slide-up md:max-w-xl">
             <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-5 py-4">
               <h3 className="text-sm font-bold text-white font-display">Expense details</h3>
@@ -1945,7 +2004,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   )}
                   <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500">
                     <Calendar className="h-3.5 w-3.5" />
-                    <span>{detailExpense.expense_date}</span>
+                    <span>Expense date · {formatExpenseDate(detailExpense.expense_date)}</span>
                   </div>
                 </div>
               </div>
@@ -2043,6 +2102,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                 </div>
               </div>
 
+              <p className="text-[10px] text-slate-500">Added on {new Date(detailExpense.created_at).toLocaleString()}<br />Last edited {new Date(detailExpense.updated_at).toLocaleString()}</p>
               {detailExpense.notes && (
                 <div className="rounded-2xl bg-[#1a1d23] border border-slate-800 p-3">
                   <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">
@@ -2053,12 +2113,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               )}
             </div>
 
+            {blockingSettlements(detailExpense, settlements).length > 0 && <div className="max-h-48 shrink-0 overflow-y-auto border-t border-black/10 bg-[#fff4dd] p-3 text-xs text-slate-700">
+              <p className="font-bold">Editing is locked by recorded repayments</p>
+              <p className="mt-1">This expense was added before these repayments. Date and notes corrections are also locked to protect settled accounting. Review the history before making a correction.</p>
+              {blockingSettlements(detailExpense, settlements).map(item => <button key={item.id} type="button" className="mt-2 block min-h-9 text-left font-semibold underline" onClick={() => onOpenSettlement(item.id)}>
+                {members.find(m => m.id === item.from_member_id)?.display_name} → {members.find(m => m.id === item.to_member_id)?.display_name} · {item.amount.toFixed(2)} {item.currency} · {new Date(item.paid_at ?? item.created_at).toLocaleDateString()} · View repayment
+              </button>)}
+            </div>}
             <div className="bg-[#1a1d23] border-t border-slate-800 p-4 shrink-0">
               {!isReadOnly && (currentMember.role === 'admin' || detailExpense.created_by_member_id === currentMember.id) ? (
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    id="btn-edit-expense"
+                    id="btn-edit-expense" disabled={blockingSettlements(detailExpense, settlements).length > 0}
                     onClick={() => handleOpenEditForm(detailExpense)}
                     className="flex items-center justify-center gap-2 bg-[#121418] border border-slate-800 hover:bg-[#20242b] text-slate-200 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
                   >
@@ -2087,7 +2154,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               )}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {isReceiptImportEnabled && hasReceiptImportSession && !editingExpense && (
@@ -2104,7 +2171,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       )}
 
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <Modal label="Delete expense?" onClose={() => { setShowDeleteConfirm(false); setFormError(null); }}>
           <div className="bg-[#121418] rounded-3xl p-5 shadow-2xl max-w-sm md:max-w-md w-full border border-slate-800 flex flex-col gap-4 animate-fade-in">
             <div className="text-center">
               <div className="w-12 h-12 rounded-full bg-[var(--color-negative)]/15 border border-[var(--color-negative)]/45 text-[var(--color-negative)] flex items-center justify-center mx-auto mb-3">
@@ -2149,7 +2216,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             )}
 
             {formError && (
-              <div className="bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
+              <div role="alert" className="bg-[#e07a5f] border border-[#e07a5f] text-[#3d405b] p-3 rounded-2xl text-xs font-bold flex gap-2 items-start">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{formError}</span>
               </div>
@@ -2158,7 +2225,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => { setShowDeleteConfirm(false); setFormError(null); }}
                 className="bg-[#1a1d23] border border-slate-800 text-slate-300 font-bold min-h-11 px-4 rounded-2xl text-sm cursor-pointer"
               >
                 Cancel
@@ -2178,7 +2245,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

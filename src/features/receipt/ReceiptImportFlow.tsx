@@ -1,3 +1,4 @@
+import { localDateKey } from '../../lib/expenseEditing';
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -91,7 +92,7 @@ const focusableSelector = [
 
 const minorToInput = (minor: number) => (minor / 100).toFixed(2);
 const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
-const todayInputValue = () => new Date().toISOString().slice(0, 10);
+const todayInputValue = () => localDateKey();
 
 const normalizeReceiptDate = (value?: string) => {
   const candidate = value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];

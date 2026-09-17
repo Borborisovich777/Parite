@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Trip, Member, Expense, ExpenseSplit, Settlement, ExchangeRate } from '../types';
 import { calculateOpenMemberBalances, calculateSettlementRecommendations } from '../lib/calculations';
 import { formatDisplayMoney, getMemberDisplayCurrency } from '../lib/exchangeRates';
 import { CheckCircle2, Clock, History, RotateCcw, Scale } from 'lucide-react';
+import { getMemberSettlementTotals } from '../lib/memberInsights';
 import { MemberAvatar } from './MemberAvatar';
 
 interface BalancesTabProps {
+  historyTarget?: string | null;
+  onHistoryTargetShown?: () => void;
   trip: Trip;
   currentMember: Member;
   expenses: Expense[];
@@ -19,6 +22,8 @@ interface BalancesTabProps {
 }
 
 export const BalancesTab: React.FC<BalancesTabProps> = ({
+  historyTarget,
+  onHistoryTargetShown,
   trip,
   currentMember,
   expenses,
@@ -32,6 +37,15 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
 }) => {
   const approvedMembers = members.filter(member => member.status === 'approved');
   const [activeSubTab, setActiveSubTab] = useState<'recommendations' | 'history'>('recommendations');
+  const [recorded, setRecorded] = useState(false);
+  useEffect(() => { if (historyTarget) setActiveSubTab('history'); }, [historyTarget]);
+  useEffect(() => {
+    if (historyTarget && activeSubTab === 'history') {
+      const entry = document.getElementById(`historic-settlement-${historyTarget}`);
+      entry?.scrollIntoView({ block: 'center' }); entry?.focus();
+      if (entry) onHistoryTargetShown?.();
+    }
+  }, [historyTarget, activeSubTab, onHistoryTargetShown]);
   const [busySettlementKey, setBusySettlementKey] = useState<string | null>(null);
 
   const balances = calculateOpenMemberBalances(expenses, splits, settlements, approvedMembers);
@@ -114,6 +128,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
 
           <div className="flex flex-col gap-1.5">
             {balances.map(balance => {
+            const repayments = getMemberSettlementTotals(balance.member_id, settlements);
             const isMe = balance.member_id === currentMember.id;
             const balanceMember = members.find(member => member.id === balance.member_id);
             const isPositive = balance.net_balance > 0.01;
@@ -145,7 +160,9 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                       {balance.display_name}{isMe ? ' (You)' : ''}
                     </p>
                     <p className="mt-1 text-[10px] font-mono text-[var(--color-muted)]">
-                      Paid {balance.total_paid.toFixed(2)} · Share {balance.total_owed.toFixed(2)}
+                      Paid {balance.total_paid.toFixed(2)} − Share {balance.total_owed.toFixed(2)}
+                      {repayments.sent > 0 && <span className="block">+ Repayments sent {repayments.sent.toFixed(2)}</span>}
+                      {repayments.received > 0 && <span className="block">− Repayments received {repayments.received.toFixed(2)}</span>}
                     </p>
                   </div>
                 </div>
@@ -237,6 +254,10 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
         </button>
           </div>
 
+          {recorded && <div role="status" className="mb-3 rounded-2xl bg-[var(--color-positive-soft)] p-3 text-xs">
+            Repayment recorded. <button type="button" className="min-h-9 font-bold underline" onClick={() => setActiveSubTab('history')}>View history or correct a repayment</button>
+            <p>To correct an entry, use Void settlement in history, then record the right amount.</p>
+          </div>}
           {activeSubTab === 'recommendations' ? (
         <section
           id="settlement-recommendations-panel"
@@ -259,7 +280,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
               const isAdmin = currentMember.role === 'admin';
               const isReceiver = currentMember.id === recommendation.to_member_id;
               const canConfirmSettlement = !isTripClosed && (isAdmin || isReceiver);
-              const confirmLabel = isReceiver && !isAdmin ? 'Confirm received' : 'Mark as paid';
+              const confirmLabel = 'Record repayment';
               const settlementKey = `${recommendation.from_member_id}-${recommendation.to_member_id}-${index}`;
               const fromMember = members.find(member => member.id === recommendation.from_member_id);
               const toMember = members.find(member => member.id === recommendation.to_member_id);
@@ -290,7 +311,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                           <strong className="text-[var(--color-positive)]">{recommendation.to_display_name}</strong>
                         </p>
                         <p className="mt-1 text-[10px] text-[var(--color-muted)]">
-                          Recommended settlement
+                          Records money already paid; no money is sent.
                         </p>
                       </div>
                     </div>
@@ -328,6 +349,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                             recommendation.to_member_id,
                             recommendation.amount
                           );
+                          setRecorded(true);
                         } catch (error) {
                           console.error(error);
                         } finally {
@@ -386,7 +408,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                 return (
                   <div
                     key={settlement.id}
-                    id={`historic-settlement-${settlement.id}`}
+                    id={`historic-settlement-${settlement.id}`} tabIndex={-1}
                     className="parite-card flex flex-col gap-3 p-4"
                   >
                     <div className="flex items-center justify-between gap-3">

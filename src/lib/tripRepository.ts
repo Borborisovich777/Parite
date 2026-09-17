@@ -652,3 +652,12 @@ export async function voidSettlement(
   const row = unwrapJsonObject(data, 'void_settlement');
   return mapWorkspaceForRpc(row, 'void_settlement');
 }
+
+/** Save metadata without recalculating or replacing any financial records. */
+export async function updateExpenseMetadata(expenseId: string, title: string, expenseDate: string, notes: string): Promise<PhaseOneWorkspace> {
+  const { data, error } = await requireSupabase().rpc('update_expense_metadata', {
+    expense_id_input: expenseId, title_input: title, expense_date_input: expenseDate, notes_input: notes,
+  });
+  if (error) throwSupabaseError(error);
+  return mapWorkspaceForRpc(unwrapJsonObject(data, 'update_expense_metadata'), 'update_expense_metadata');
+}

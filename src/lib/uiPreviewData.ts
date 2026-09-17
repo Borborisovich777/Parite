@@ -1,3 +1,4 @@
+import { localDateKey } from './expenseEditing';
 import type { PhaseOneWorkspace } from './tripRepository';
 import type { Currency, Expense, ExpenseSplit, Member } from '../types';
 
@@ -7,7 +8,7 @@ const isoDate = (daysAgo = 0) => {
   const date = new Date();
   date.setHours(12, 0, 0, 0);
   date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().slice(0, 10);
+  return localDateKey(date);
 };
 
 const now = new Date().toISOString();
