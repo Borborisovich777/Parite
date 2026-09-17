@@ -70,6 +70,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
   useEffect(() => {
     setActiveCategory(initialCategory);
   }, [initialCategory]);
+  useEffect(() => { if (activeCategory === "requests") { const panel = document.getElementById("members-requests-panel"); panel?.scrollIntoView({ block: "start" }); panel?.focus(); } }, [activeCategory]);
 
   const runMemberAction = async (memberId: string, actionType: BusyMemberAction, action: () => void | Promise<void>) => {
     setBusyMemberAction({ memberId, action: actionType });
@@ -121,13 +122,14 @@ export const MembersTab: React.FC<MembersTabProps> = ({
         </div>
       </div>
 
-      {isAdmin && isTripActive && (
+      {isAdmin && isTripActive && activeCategory !== 'requests' && (
+        <details className="parite-card p-4"><summary className="cursor-pointer text-sm font-bold">Invite someone to {trip.name}</summary>
         <InviteShareCard
           groupName={trip.name}
           inviteCode={trip.invite_code}
           inviteUrl={buildInviteUrl(trip.invite_code, window.location.href)}
           onRegenerateInviteCode={onRegenerateInviteCode}
-        />
+        /></details>
       )}
 
       {canManageRequests && (
@@ -320,7 +322,7 @@ export const MembersTab: React.FC<MembersTabProps> = ({
 
       {canManageRequests && activeCategory === 'requests' && (
         <section
-          id="members-requests-panel"
+          id="members-requests-panel" tabIndex={-1}
           role="tabpanel"
           aria-labelledby="btn-requests-filter"
           className="flex flex-col gap-4"
@@ -334,62 +336,6 @@ export const MembersTab: React.FC<MembersTabProps> = ({
               <p className="mt-1 text-xs text-[var(--color-muted)]">New accounts and group join requests will appear here automatically.</p>
             </div>
           ) : null}
-
-          {isPlatformAdmin && accountRequests.length > 0 && (
-            <section aria-labelledby="account-request-heading">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div>
-                  <h2 id="account-request-heading" className="flex items-center gap-2 text-sm font-bold text-[var(--color-text)]">
-                    <ShieldCheck className="h-4 w-4 text-[var(--color-positive)]" />
-                    New account requests
-                  </h2>
-                  <p className="mt-1 text-[10px] text-[var(--color-muted)]">Approve an account before it can join any group.</p>
-                </div>
-                <span className="rounded-full bg-[var(--color-positive-soft)] px-2.5 py-1 text-[10px] font-bold text-[var(--color-positive)]">
-                  {accountRequests.length}
-                </span>
-              </div>
-
-              <div className="grid gap-3 lg:grid-cols-2">
-                {accountRequests.map(request => {
-                  const isBusy = busyAccountUserId === request.user_id;
-                  return (
-                    <div key={request.user_id} id={`account-request-${request.user_id}`} className="parite-card flex flex-col gap-3 p-3.5">
-                      <div className="min-w-0">
-                        <p className="break-all text-sm font-bold text-[var(--color-text)]">{request.email}</p>
-                        <p className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[var(--color-muted)]">
-                          <Clock className="h-3 w-3" />
-                          Requested {new Date(request.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          id={`btn-reject-account-${request.user_id}`}
-                          onClick={() => onRejectAccount?.(request.user_id)}
-                          disabled={Boolean(busyAccountUserId) || !onRejectAccount}
-                          className="flex min-h-10 cursor-pointer items-center justify-center gap-1 rounded-xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 text-xs font-bold text-[var(--color-negative)] disabled:opacity-60"
-                        >
-                          <UserX className="h-4 w-4" />
-                          {isBusy && busyAccountDecision === 'reject' ? 'Working...' : 'Reject'}
-                        </button>
-                        <button
-                          type="button"
-                          id={`btn-approve-account-${request.user_id}`}
-                          onClick={() => onApproveAccount?.(request.user_id)}
-                          disabled={Boolean(busyAccountUserId) || !onApproveAccount}
-                          className="flex min-h-10 cursor-pointer items-center justify-center gap-1 rounded-xl bg-[var(--color-positive)] px-3 text-xs font-bold text-white disabled:opacity-60"
-                        >
-                          <UserCheck className="h-4 w-4" />
-                          {isBusy && busyAccountDecision === 'approve' ? 'Working...' : 'Approve'}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
 
           {isAdmin && pendingRequests.length > 0 && (
             <section aria-labelledby="group-request-heading">
@@ -459,6 +405,63 @@ export const MembersTab: React.FC<MembersTabProps> = ({
               </div>
             </section>
           )}
+          {isPlatformAdmin && accountRequests.length > 0 && (
+            <section aria-labelledby="account-request-heading">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <h2 id="account-request-heading" className="flex items-center gap-2 text-sm font-bold text-[var(--color-text)]">
+                    <ShieldCheck className="h-4 w-4 text-[var(--color-positive)]" />
+                    New account requests
+                  </h2>
+                  <p className="mt-1 text-[10px] text-[var(--color-muted)]">Approve an account before it can join any group.</p>
+                </div>
+                <span className="rounded-full bg-[var(--color-positive-soft)] px-2.5 py-1 text-[10px] font-bold text-[var(--color-positive)]">
+                  {accountRequests.length}
+                </span>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                {accountRequests.map(request => {
+                  const isBusy = busyAccountUserId === request.user_id;
+                  return (
+                    <div key={request.user_id} id={`account-request-${request.user_id}`} className="parite-card flex flex-col gap-3 p-3.5">
+                      <div className="min-w-0">
+                        <p className="break-all text-sm font-bold text-[var(--color-text)]">{request.email}</p>
+                        <p className="mt-1 flex items-center gap-1 text-[10px] font-mono text-[var(--color-muted)]">
+                          <Clock className="h-3 w-3" />
+                          Requested {new Date(request.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          id={`btn-reject-account-${request.user_id}`}
+                          onClick={() => onRejectAccount?.(request.user_id)}
+                          disabled={Boolean(busyAccountUserId) || !onRejectAccount}
+                          className="flex min-h-10 cursor-pointer items-center justify-center gap-1 rounded-xl border border-[var(--color-negative)]/15 bg-[var(--color-negative-soft)] px-3 text-xs font-bold text-[var(--color-negative)] disabled:opacity-60"
+                        >
+                          <UserX className="h-4 w-4" />
+                          {isBusy && busyAccountDecision === 'reject' ? 'Working...' : 'Reject'}
+                        </button>
+                        <button
+                          type="button"
+                          id={`btn-approve-account-${request.user_id}`}
+                          onClick={() => onApproveAccount?.(request.user_id)}
+                          disabled={Boolean(busyAccountUserId) || !onApproveAccount}
+                          className="flex min-h-10 cursor-pointer items-center justify-center gap-1 rounded-xl bg-[var(--color-positive)] px-3 text-xs font-bold text-white disabled:opacity-60"
+                        >
+                          <UserCheck className="h-4 w-4" />
+                          {isBusy && busyAccountDecision === 'approve' ? 'Working...' : 'Approve'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+
         </section>
       )}
 

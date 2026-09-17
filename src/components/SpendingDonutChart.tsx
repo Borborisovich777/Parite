@@ -208,7 +208,7 @@ export const SpendingDonutChart: React.FC<SpendingDonutChartProps> = ({
       </div>
 
       <p className="mt-3 text-center text-[10px] font-medium text-[var(--color-muted)]">
-        Select a slice or category to filter the expenses below.
+        Select a slice or category to filter contributing expenses.
       </p>
       <p className="sr-only" role="status" aria-live="polite">
         {selectedSlice

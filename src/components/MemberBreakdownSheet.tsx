@@ -13,6 +13,7 @@ import {
   getMemberTotalShare,
   MemberExpenseInsight,
 } from '../lib/memberInsights';
+import { formatExpenseDate } from '../lib/expenseEditing';
 import { SpendingDonutChart, type SpendingDonutSlice } from './SpendingDonutChart';
 import { MemberAvatar } from './MemberAvatar';
 import { ExpenseIcon } from './ExpenseIcon';
@@ -25,7 +26,7 @@ import {
 } from '../lib/expenseVisuals';
 
 type ChartMode = 'paid' | 'share';
-type ExpenseListMode = 'paid' | 'shared';
+type ExpenseListMode = 'all' | 'paid' | 'shared';
 
 const focusableSelector = [
   'a[href]',
@@ -47,6 +48,8 @@ const CATEGORY_CHART_VISUAL_IDS = {
 } as const satisfies Record<ExpenseVisualCategoryId, ExpenseVisualId>;
 
 interface MemberBreakdownSheetProps {
+  onOpenExpense: (id: string) => void;
+  onOpenSettlement: (id: string) => void;
   isOpen: boolean;
   onClose: () => void;
   member: Member | null;
@@ -60,6 +63,8 @@ interface MemberBreakdownSheetProps {
 }
 
 export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
+  onOpenExpense,
+  onOpenSettlement,
   isOpen,
   onClose,
   member,
@@ -78,7 +83,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   const [chartMode, setChartMode] = useState<ChartMode>('paid');
-  const [expenseListMode, setExpenseListMode] = useState<ExpenseListMode>('paid');
+  const [expenseListMode, setExpenseListMode] = useState<ExpenseListMode>('all');
   const [selectedCategoryId, setSelectedCategoryId] = useState<ExpenseVisualCategoryId | null>(null);
   const baseCurrency = trip.base_currency;
   const displayCurrency = getMemberDisplayCurrency(currentMember, trip);
@@ -157,6 +162,8 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
 
   useEffect(() => {
     setSelectedCategoryId(null);
+    setExpenseListMode('all');
+    setChartMode('paid');
   }, [isOpen, member?.id]);
 
   useEffect(() => {
@@ -255,7 +262,8 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
   const memberName = member.display_name;
   const paidExpenseCount = relevantExpenses.paid.length;
   const sharedExpenseCount = relevantExpenses.shared.length;
-  const unfilteredListItems = expenseListMode === 'paid' ? relevantExpenses.paid : relevantExpenses.shared;
+  const allRelevantExpenses = [...new Map([...relevantExpenses.paid, ...relevantExpenses.shared].map(item => [item.expense.id, item])).values()].sort((a, b) => b.expense.expense_date.localeCompare(a.expense.expense_date));
+  const unfilteredListItems = expenseListMode === 'all' ? allRelevantExpenses : expenseListMode === 'paid' ? relevantExpenses.paid : relevantExpenses.shared;
   const getExpenseCategoryId = (expense: Expense): ExpenseVisualCategoryId => resolveExpenseVisual(
     expense.title,
     readExpenseVisualPreference(trip.id, expense.title),
@@ -278,7 +286,7 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
 
   const handleExpenseListModeChange = (nextMode: ExpenseListMode) => {
     setExpenseListMode(nextMode);
-    setChartMode(nextMode === 'paid' ? 'paid' : 'share');
+    if (nextMode !== 'all') setChartMode(nextMode === 'paid' ? 'paid' : 'share');
     setSelectedCategoryId(null);
   };
 
@@ -340,9 +348,9 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
               size="md"
             />
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-slate-100">{expense.title}</p>
+              <button type="button" onClick={() => onOpenExpense(expense.id)} className="min-h-9 text-left text-sm font-bold text-slate-100 underline">{expense.title}</button>
               <p className="mt-1 truncate text-[10px] text-slate-500">
-                Paid by {findMemberName(expense.paid_by_member_id)} · {new Date(expense.expense_date).toLocaleDateString()}
+                Paid by {findMemberName(expense.paid_by_member_id)} · {formatExpenseDate(expense.expense_date)}
               </p>
             </div>
           </div>
@@ -420,6 +428,80 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
         </div>
 
         <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
+          <section className="rounded-2xl bg-[var(--color-positive-soft)] p-4 text-sm" aria-label="Balance explanation">
+            <h3 className="font-bold">{memberName} {memberMetrics.openBalance < -0.01 ? 'owes' : memberMetrics.openBalance > 0.01 ? 'gets back' : 'is settled'}{Math.abs(memberMetrics.openBalance) > 0.01 ? ` ${formatMoney(Math.abs(memberMetrics.openBalance), baseCurrency)}` : ''}</h3>
+            <p className="mt-2 text-xs leading-relaxed">Paid {formatMoney(memberMetrics.totalPaid, baseCurrency)} − Share {formatMoney(memberMetrics.totalShare, baseCurrency)} + Repayments sent {formatMoney(memberMetrics.settlements.sent, baseCurrency)} − Repayments received {formatMoney(memberMetrics.settlements.received, baseCurrency)} = {formatMoney(memberMetrics.openBalance, baseCurrency)}</p>
+            <a href="#member-contributing-expenses" className="mt-2 inline-block min-h-9 text-xs font-bold underline">View contributing expenses</a>
+            {settlements.filter(s => s.status === 'paid' && (s.from_member_id === member.id || s.to_member_id === member.id)).map(s => <button type="button" key={s.id} onClick={() => onOpenSettlement(s.id)} className="block min-h-9 text-left text-xs underline">{findMemberName(s.from_member_id)} → {findMemberName(s.to_member_id)} · {formatMoney(s.amount, baseCurrency)} · View repayment</button>)}
+          </section>
+          <section id="member-contributing-expenses" className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0" aria-live="polite">
+                <h3 className="truncate text-sm font-bold text-slate-100">
+                  {selectedCategory ? `${selectedCategory.label} expenses` : 'Expenses'}
+                </h3>
+                <span className="text-[10px] font-mono text-slate-500">
+                  {selectedCategory ? `${listItems.length} shown · ` : ''}{paidExpenseCount} paid · {sharedExpenseCount} shared
+                </span>
+              </div>
+              {selectedCategory && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryId(null)}
+                  className="min-h-9 cursor-pointer rounded-full border px-3 text-[10px] font-bold"
+                  style={{
+                    backgroundColor: selectedCategory.palette.surface,
+                    borderColor: selectedCategory.palette.border,
+                    color: selectedCategory.palette.foreground,
+                  }}
+                  aria-label={`Clear ${selectedCategory.label} category filter`}
+                >
+                  Clear filter
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 rounded-2xl border border-slate-800 bg-[#1a1d23] p-1">
+              <button type="button" onClick={() => handleExpenseListModeChange('all')} aria-pressed={expenseListMode === 'all'} className={`min-h-10 rounded-xl text-xs font-bold ${expenseListMode === 'all' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500'}`}>All involving</button>
+              <button
+                type="button"
+                onClick={() => handleExpenseListModeChange('paid')}
+                aria-pressed={expenseListMode === 'paid'}
+                className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
+                  expenseListMode === 'paid' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Paid
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExpenseListModeChange('shared')}
+                aria-pressed={expenseListMode === 'shared'}
+                className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
+                  expenseListMode === 'shared' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Shared
+              </button>
+            </div>
+
+            {listItems.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-800 bg-[#1a1d23] px-4 py-8 text-center">
+                <p className="text-xs font-semibold text-slate-400">
+                  {selectedCategory
+                    ? `No ${selectedCategory.label.toLocaleLowerCase()} expenses in this view.`
+                    : listEmptyText}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {listItems.map(item => (
+                  <ExpenseRow key={`${expenseListMode}-${item.expense.id}`} item={item} />
+                ))}
+              </div>
+            )}
+          </section>
+          <details className="rounded-2xl border border-slate-800 p-3"><summary className="cursor-pointer text-xs font-bold">More totals</summary>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <MetricCard label="Paid" amount={memberMetrics.totalPaid} icon={<Wallet className="w-4 h-4" />} />
             <MetricCard label="Share" amount={memberMetrics.totalShare} icon={<Scale className="w-4 h-4" />} />
@@ -461,8 +543,9 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
               </div>
             )}
           </section>
-
+          </details>
           <section className="flex min-w-0 flex-col gap-3">
+            <h3 className="text-sm font-bold">{chartMode === 'paid' ? `Expenses ${memberName} paid, by category` : `${memberName}’s shares, by category`}</h3>
             <SpendingDonutChart
               slices={chartSlices}
               currency={baseCurrency}
@@ -470,73 +553,6 @@ export const MemberBreakdownSheet: React.FC<MemberBreakdownSheetProps> = ({
               selectedSliceId={selectedCategoryId}
               onSelectSlice={handleCategorySelection}
             />
-          </section>
-
-          <section className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0" aria-live="polite">
-                <h3 className="truncate text-sm font-bold text-slate-100">
-                  {selectedCategory ? `${selectedCategory.label} expenses` : 'Expenses'}
-                </h3>
-                <span className="text-[10px] font-mono text-slate-500">
-                  {selectedCategory ? `${listItems.length} shown · ` : ''}{paidExpenseCount} paid · {sharedExpenseCount} shared
-                </span>
-              </div>
-              {selectedCategory && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedCategoryId(null)}
-                  className="min-h-9 cursor-pointer rounded-full border px-3 text-[10px] font-bold"
-                  style={{
-                    backgroundColor: selectedCategory.palette.surface,
-                    borderColor: selectedCategory.palette.border,
-                    color: selectedCategory.palette.foreground,
-                  }}
-                  aria-label={`Clear ${selectedCategory.label} category filter`}
-                >
-                  Clear filter
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-slate-800 bg-[#1a1d23] p-1">
-              <button
-                type="button"
-                onClick={() => handleExpenseListModeChange('paid')}
-                aria-pressed={expenseListMode === 'paid'}
-                className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                  expenseListMode === 'paid' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                Paid
-              </button>
-              <button
-                type="button"
-                onClick={() => handleExpenseListModeChange('shared')}
-                aria-pressed={expenseListMode === 'shared'}
-                className={`min-h-10 rounded-xl text-xs font-bold cursor-pointer ${
-                  expenseListMode === 'shared' ? 'bg-indigo-600 text-slate-950' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                Shared
-              </button>
-            </div>
-
-            {listItems.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-slate-800 bg-[#1a1d23] px-4 py-8 text-center">
-                <p className="text-xs font-semibold text-slate-400">
-                  {selectedCategory
-                    ? `No ${selectedCategory.label.toLocaleLowerCase()} expenses in this view.`
-                    : listEmptyText}
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {listItems.map(item => (
-                  <ExpenseRow key={`${expenseListMode}-${item.expense.id}`} item={item} />
-                ))}
-              </div>
-            )}
           </section>
         </div>
       </section>

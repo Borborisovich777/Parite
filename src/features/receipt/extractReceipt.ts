@@ -1,3 +1,4 @@
+import { localDateKey } from '../../lib/expenseEditing';
 import { requireSupabase } from '../../lib/supabase';
 import type { ReceiptExtractionResult } from './types';
 import type { PreparedReceiptImage } from './preprocessReceiptImage';
@@ -73,7 +74,7 @@ const readBoundedJson = async (response: Response): Promise<unknown> => {
 
 const mockReceipt = (): ReceiptExtractionResult => ({
   merchant: 'Orfali Bros',
-  purchasedAt: new Date().toISOString().slice(0, 10),
+  purchasedAt: localDateKey(),
   currency: 'AED',
   subtotalMinor: 15_200,
   totalMinor: 16_720,

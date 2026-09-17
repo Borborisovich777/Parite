@@ -46,6 +46,8 @@ type MembersTabProps = React.ComponentProps<typeof MembersTab>;
 const nowIso = () => new Date().toISOString();
 
 type PreviewScenario =
+  | 'empty'
+  | 'requests'
   | 'active-open'
   | 'active-settled'
   | 'closing-voted'
@@ -55,6 +57,8 @@ type PreviewScenario =
 const getPreviewScenario = (): PreviewScenario => {
   const requestedScenario = new URLSearchParams(window.location.search).get('scenario');
   return [
+    'empty',
+    'requests',
     'active-open',
     'active-settled',
     'closing-voted',
@@ -82,6 +86,8 @@ const createScenarioWorkspace = () => {
   const trip = baseWorkspace.trip!;
   const approvedMembers = baseWorkspace.members.filter(member => member.status === 'approved');
 
+  if (scenario === 'empty') return { ...baseWorkspace, expenses: [], splits: [], settlements: [], members: [baseWorkspace.currentMember!] };
+  if (scenario === 'requests') return { ...baseWorkspace, members: [...baseWorkspace.members, { ...baseWorkspace.currentMember!, id: 'preview-pending-member', user_id: 'preview-pending-user', display_name: 'Alex QA', role: 'member' as const, status: 'pending' as const }] };
   if (scenario === 'active-open') return baseWorkspace;
 
   const openBalances = calculateOpenMemberBalances(
@@ -261,9 +267,10 @@ export const UiPreview: React.FC = () => {
   ));
   const [previewEmail] = useState('mira@example.com');
   const [previewPendingEmail, setPreviewPendingEmail] = useState<string | null>(null);
+  const [settlementHistoryTarget, setSettlementHistoryTarget] = useState<string | null>(null);
   const [selectedBreakdownMemberId, setSelectedBreakdownMemberId] = useState<string | null>(null);
   const [membersInitialCategory, setMembersInitialCategory] = useState<'approved' | 'requests' | 'removed'>('approved');
-  const [previewAccountRequests, setPreviewAccountRequests] = useState<AccountAccess[]>(() => [{
+  const [previewAccountRequests, setPreviewAccountRequests] = useState<AccountAccess[]>(() => getPreviewScenario() === 'empty' ? [] : [{
     user_id: 'preview-account-sami',
     email: 'sami@example.com',
     role: 'user',
@@ -272,6 +279,7 @@ export const UiPreview: React.FC = () => {
     updated_at: nowIso(),
   }]);
 
+  const previewRequestCount = previewAccountRequests.length + workspace.members.filter(member => member.status === "pending").length;
   const trip = workspace.trip!;
   const currentMember = workspace.currentMember!;
   const closeoutBlockers = useMemo(() => {
@@ -467,6 +475,7 @@ export const UiPreview: React.FC = () => {
     splitInputs,
     feeInput
   ) => {
+    if (new URLSearchParams(window.location.search).get('saveError') === '1') throw new Error('This expense was protected by a repayment recorded while you were editing. Your draft is unchanged.');
     const updatedAt = nowIso();
     const nextSplits: ExpenseSplit[] = splitInputs.map((split, index) => ({
       id: `${expenseId}-split-${index}`,
@@ -771,7 +780,7 @@ export const UiPreview: React.FC = () => {
           variant="desktop"
           activeTab={activeTab}
           onChangeTab={changeTab}
-          pendingRequestsCount={previewAccountRequests.length}
+          pendingRequestsCount={previewRequestCount}
           showAdminBadge
         />
 
@@ -783,7 +792,7 @@ export const UiPreview: React.FC = () => {
             currentMemberId={currentMember.id}
             activeTab={activeTab}
             onChangeTab={changeTab}
-            pendingRequestsCount={previewAccountRequests.length}
+            pendingRequestsCount={previewRequestCount}
             showAdminBadge
             onSwitchWorkspace={async () => undefined}
             onCreateTrip={() => undefined}
@@ -810,7 +819,7 @@ export const UiPreview: React.FC = () => {
               settlements={workspace.settlements}
               exchangeRates={workspace.exchangeRates}
               members={workspace.members}
-              pendingRequestsCount={previewAccountRequests.length}
+              pendingRequestsCount={previewRequestCount}
               isReadOnly={trip.status !== 'active'}
               onAddExpense={() => {
                 changeTab('expenses');
@@ -818,7 +827,7 @@ export const UiPreview: React.FC = () => {
               }}
               onReviewBalances={() => changeTab('balances')}
               onManageMembers={() => {
-                setMembersInitialCategory(previewAccountRequests.length > 0 ? 'requests' : 'approved');
+                setMembersInitialCategory(previewRequestCount > 0 ? 'requests' : 'approved');
                 changeTab('members');
               }}
               onOpenExpense={(expenseId) => {
@@ -841,6 +850,8 @@ export const UiPreview: React.FC = () => {
                     members={workspace.members}
                     onCreateExpense={handleCreateExpense}
                     onUpdateExpense={handleUpdateExpense}
+                    onUpdateExpenseMetadata={async (id, title, date, notes) => { if (new URLSearchParams(window.location.search).get('saveError') === '1') throw new Error('This expense was protected by a repayment recorded while you were editing. Your draft is unchanged.'); setWorkspace(previous => ({ ...previous, expenses: previous.expenses.map(expense => expense.id === id ? { ...expense, title, expense_date: date, notes, updated_at: nowIso() } : expense) })); }}
+                    onOpenSettlement={id => { setSelectedExpenseId(null); setSettlementHistoryTarget(id); changeTab('balances'); }}
                     onDeleteExpense={handleDeleteExpense}
                     selectedExpenseIdForDetail={selectedExpenseId}
                     onSetSelectedExpenseId={setSelectedExpenseId}
@@ -858,10 +869,10 @@ export const UiPreview: React.FC = () => {
                     settlements={workspace.settlements}
                     members={workspace.members}
                     exchangeRates={workspace.exchangeRates}
-                    pendingRequestsCount={previewAccountRequests.length}
+                    pendingRequestsCount={previewRequestCount}
                     onReviewBalances={() => changeTab('balances')}
                     onManageMembers={() => {
-                      setMembersInitialCategory(previewAccountRequests.length > 0 ? 'requests' : 'approved');
+                      setMembersInitialCategory(previewRequestCount > 0 ? 'requests' : 'approved');
                       changeTab('members');
                     }}
                   />
@@ -871,6 +882,8 @@ export const UiPreview: React.FC = () => {
 
           {activeTab === 'balances' && (
             <BalancesTab
+              historyTarget={settlementHistoryTarget}
+              onHistoryTargetShown={() => setSettlementHistoryTarget(null)}
               trip={trip}
               currentMember={currentMember}
               expenses={workspace.expenses}
@@ -911,6 +924,8 @@ export const UiPreview: React.FC = () => {
         </div>
 
         <MemberBreakdownSheet
+          onOpenExpense={id => { setSelectedBreakdownMemberId(null); changeTab('expenses'); setSelectedExpenseId(id); }}
+          onOpenSettlement={id => { setSelectedBreakdownMemberId(null); setSettlementHistoryTarget(id); changeTab('balances'); }}
           isOpen={Boolean(selectedBreakdownMember)}
           onClose={() => setSelectedBreakdownMemberId(null)}
           member={selectedBreakdownMember}
@@ -926,7 +941,7 @@ export const UiPreview: React.FC = () => {
         <BottomNav
           activeTab={activeTab}
           onChangeTab={changeTab}
-          pendingRequestsCount={previewAccountRequests.length}
+          pendingRequestsCount={previewRequestCount}
           showAdminBadge
         />
 
